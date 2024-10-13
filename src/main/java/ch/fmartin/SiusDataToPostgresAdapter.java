@@ -1,0 +1,787 @@
+package ch.fmartin;
+
+import com.google.common.base.Throwables;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.Reader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.file.ClosedWatchServiceException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+
+/**
+ * Adapter for monitoring a directory for CSV files, processing them, and inserting data into PostgreSQL.
+ * It ensures single-threaded processing and queues file changes to be handled sequentially.
+ */
+public class SiusDataToPostgresAdapter {
+
+    private static final Logger logger = LoggerFactory.getLogger(SiusDataToPostgresAdapter.class);
+
+    // Configuration properties from environment variables
+    private static final String DIRECTORY_TO_WATCH = System.getenv("CSV_MONITOR_PATH");
+    private static final String JDBC_URL = System.getenv("POSTGRESQL_URL");
+    private static final String JDBC_USER = System.getenv("POSTGRESQL_USER");
+    private static final String JDBC_PASSWORD = System.getenv("POSTGRESQL_PASSWORD");
+    private static final String PUSHBULLET_API_KEY = System.getenv("PUSHBULLET_API_KEY");
+
+    // Single-threaded executor for processing files sequentially
+    private static ExecutorService executorService;
+
+    // Connection pool to database
+    private static HikariDataSource dataSource;
+
+    // WatchService to monitor directory
+    private static WatchService watchService;
+
+    // Set to track files that are already queued or being processed
+    private static final Set<String> queuedFiles = ConcurrentHashMap.newKeySet();
+
+    // CSV file must start with eight digits, can be followed by anything, must end with .csv
+    private static final Pattern CSV_FILE_PATTERN = Pattern.compile("^\\d{8}.*\\.csv$", Pattern.CASE_INSENSITIVE);
+
+    public static void main(String[] args) {
+        try {
+            validateEnvironmentVariables();
+            initializeDataSource();
+            initializeDatabaseSchema();
+
+            // Initialize single-threaded Executor Service
+            executorService = Executors.newSingleThreadExecutor();
+            logger.info("Initialized single-threaded executor for file processing.");
+
+            // Initialize WatchService
+            watchService = FileSystems.getDefault().newWatchService();
+            Path directoryPath = Paths.get(DIRECTORY_TO_WATCH);
+
+            // Validate directory
+            if (!Files.isDirectory(directoryPath)) {
+                logger.error("The provided path is not a directory: {}", directoryPath.toString());
+                shutdown();
+                return;
+            }
+
+            // Register directory with WatchService
+            directoryPath.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
+            logger.info("Monitoring directory: {}", directoryPath.toAbsolutePath());
+
+            // Add shutdown hook for graceful shutdown
+            Runtime.getRuntime().addShutdownHook(new Thread(SiusDataToPostgresAdapter::shutdown));
+
+            // Process existing CSV files upon startup
+            processExistingFiles(directoryPath);
+
+            // Start watching the directory for new files
+            watchDirectory();
+
+        } catch (Exception e) {
+            logError("Unexpected error in main method: " + e.getMessage(), e);
+            shutdown();
+        }
+    }
+
+    /**
+     * Validates that all necessary environment variables are set.
+     * Exits the application if any required variable is missing.
+     */
+    private static void validateEnvironmentVariables() {
+        if (DIRECTORY_TO_WATCH == null || DIRECTORY_TO_WATCH.isEmpty()) {
+            logger.error("Environment variable CSV_MONITOR_PATH is not set.");
+            System.exit(1);
+        }
+        if (JDBC_URL == null || JDBC_URL.isEmpty()) {
+            logger.error("Environment variable POSTGRESQL_URL is not set.");
+            System.exit(1);
+        }
+        if (JDBC_USER == null || JDBC_USER.isEmpty()) {
+            logger.error("Environment variable POSTGRESQL_USER is not set.");
+            System.exit(1);
+        }
+        if (JDBC_PASSWORD == null || JDBC_PASSWORD.isEmpty()) {
+            logger.error("Environment variable POSTGRESQL_PASSWORD is not set.");
+            System.exit(1);
+        }
+        if (PUSHBULLET_API_KEY == null || PUSHBULLET_API_KEY.isEmpty()) {
+            logger.warn("Environment variable PUSHBULLET_API_KEY is not set. Pushbullet notifications will be disabled.");
+        }
+        logger.info("All required environment variables are set.");
+    }
+
+    /**
+     * Initializes the HikariCP DataSource with a configurable pool size.
+     */
+    private static void initializeDataSource() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(JDBC_URL);
+        config.setUsername(JDBC_USER);
+        config.setPassword(JDBC_PASSWORD);
+        config.setMaximumPoolSize(3); // Adjust as needed
+        config.setMinimumIdle(2); // Adjust as needed
+        config.setIdleTimeout(300_000); // 5 minutes
+        config.setMaxLifetime(1_800_000); // 30 minutes
+        config.setPoolName("SiusDataHikariCP");
+
+        dataSource = new HikariDataSource(config);
+        logger.info("HikariCP DataSource initialized with pool name '{}', maximum pool size {}.", config.getPoolName(), config.getMaximumPoolSize());
+    }
+
+    /**
+     * Initializes the database schema by creating necessary tables if they don't exist,
+     * including the new 'filename' column in 'siusdata_shots'.
+     */
+    private static void initializeDatabaseSchema() {
+        String createSiusdataShotsTable = "CREATE TABLE IF NOT EXISTS siusdata_shots (" +
+                "id SERIAL PRIMARY KEY," +
+                "filename TEXT," +
+                "start_number INT," +
+                "score TEXT," +
+                "phase INT," +
+                "target_number INT," +
+                "score2 TEXT," +
+                "score3 TEXT," +
+                "time TEXT," +
+                "is_inner_ten BOOLEAN," +
+                "coordinate_x TEXT," +
+                "coordinate_y TEXT," +
+                "is_in_time BOOLEAN," +
+                "light_phase_time_span TEXT," +
+                "is_right_sweep BOOLEAN," +
+                "is_demo BOOLEAN," +
+                "shoot_ordinal INT," +
+                "practice_ordinal INT," +
+                "manual_status INT," +
+                "total_kind INT," +
+                "group_ordinal INT," +
+                "fire_kind INT," +
+                "log_event_id BIGINT," +
+                "log_type INT," +
+                "date TIMESTAMP," +
+                "relay INT," +
+                "weapon INT," +
+                "position INT," +
+                "target_code INT," +
+                "external_number INT" +
+                ");";
+
+        String createFileProgressTable = "CREATE TABLE IF NOT EXISTS file_progress (" +
+                "file_name TEXT PRIMARY KEY," +
+                "last_processed_line INT" +
+                ");";
+
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+
+            stmt.executeUpdate(createSiusdataShotsTable);
+            logger.info("'siusdata_shots' table created or exists already.");
+
+            stmt.executeUpdate(createFileProgressTable);
+            logger.info("'file_progress' table created or exists already.");
+
+        } catch (SQLException e) {
+            logError("Error initializing database schema: " + e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Sends a notification through Pushbullet if the API key is set.
+     *
+     * @param title   The title of the notification.
+     * @param message The message body of the notification.
+     */
+    private static void sendPushbulletNotification(String title, String message) {
+        if (PUSHBULLET_API_KEY == null || PUSHBULLET_API_KEY.isEmpty()) {
+            logger.debug("Pushbullet API key not set. Skipping notification.");
+            return;
+        }
+
+        try {
+            URL url = new URL("https://api.pushbullet.com/v2/pushes");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Access-Token", PUSHBULLET_API_KEY);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+
+            String payload = String.format("{\"type\": \"note\", \"title\": \"SiusData Adapter: %s\", \"body\": \"%s\"}", escapeJson(title), escapeJson(message));
+            conn.getOutputStream().write(payload.getBytes("UTF-8"));
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode != 200) {
+                logger.error("Failed to send Pushbullet notification. Response Code: {}", responseCode);
+            } else {
+                logger.debug("Pushbullet notification sent successfully.");
+            }
+
+            conn.disconnect();
+        } catch (IOException e) {
+            logger.error("Error sending Pushbullet notification: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Escapes JSON special characters in strings.
+     *
+     * @param text The input text.
+     * @return The escaped text.
+     */
+    private static String escapeJson(String text) {
+        return text.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+    }
+
+    /**
+     * Watches the configured directory for CSV file creation and modification events.
+     * Submits detected files for processing.
+     */
+    private static void watchDirectory() {
+        logger.info("Starting directory watch loop.");
+        while (true) {
+            WatchKey key;
+            try {
+                key = watchService.take();  // Wait for a watch key to be available
+            } catch (InterruptedException e) {
+                logger.warn("Watch service interrupted.");
+                Thread.currentThread().interrupt();
+                break;
+            } catch (ClosedWatchServiceException e) {
+                logger.info("Watch service closed.");
+                break;
+            }
+
+            for (WatchEvent<?> event : key.pollEvents()) {
+                WatchEvent.Kind<?> kind = event.kind();
+
+                // Overflow event
+                if (kind == StandardWatchEventKinds.OVERFLOW) {
+                    logger.warn("File system event overflow occurred.");
+                    continue;
+                }
+
+                // Context for directory entry event is the file name of entry
+                WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                String fileName = ev.context().toString();
+                Path filePath = Paths.get(DIRECTORY_TO_WATCH).resolve(fileName);
+
+                // Check if the file matches the CSV pattern
+                if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
+                    if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                        logger.info("Detected {} event for file: {}", kind.name(), fileName);
+                        submitFileForProcessing(filePath);
+                    }
+                } else {
+                    logger.debug("Skipping non-matching file or directory: {}", fileName);
+                }
+            }
+
+            // Reset the key -- this step is critical to receive further watch events.
+            boolean valid = key.reset();
+            if (!valid) {
+                logError("Watch key is no longer valid. Stopping watch service.", null);
+                break;
+            }
+        }
+    }
+
+    /**
+     * Checks if the file name matches the expected CSV pattern.
+     *
+     * @param fileName The name of the file.
+     * @return True if it matches, false otherwise.
+     */
+    private static boolean isValidCsvFile(String fileName) {
+        return CSV_FILE_PATTERN.matcher(fileName).matches();
+    }
+
+    /**
+     * Submits a file for processing by enqueuing the task.
+     * Ensures that a file is only queued once at a time.
+     *
+     * @param filePath The path to the file to process.
+     */
+    private static void submitFileForProcessing(Path filePath) {
+        String fileName = filePath.getFileName().toString();
+        // Attempt to add the file to the queuedFiles set
+        boolean isQueued = queuedFiles.add(fileName);
+        if (isQueued) {
+            logger.info("Enqueued file {} for processing.", fileName);
+            executorService.submit(() -> {
+                try {
+                    processFile(filePath);
+                } finally {
+                    // Remove the file from queuedFiles after processing
+                    queuedFiles.remove(fileName);
+                    logger.info("Finished processing file: {}", fileName);
+                }
+            });
+        } else {
+            logger.info("File {} is already queued or being processed. Skipping submission.", fileName);
+        }
+    }
+
+    /**
+     * Processes a single CSV file: reads new lines and inserts data into the database.
+     * Continues processing until no new lines are detected.
+     *
+     * @param filePath The path to the CSV file.
+     */
+    private static void processFile(Path filePath) {
+        String fileNameWithExtension = filePath.getFileName().toString();
+        logger.info("Started processing file: {}", fileNameWithExtension);
+
+        boolean keepProcessing = true;
+        while (keepProcessing) {
+            try (Connection conn = dataSource.getConnection()) {
+
+                // Disable auto-commit for transaction management
+                conn.setAutoCommit(false);
+
+                try {
+                    // Retrieve last processed line
+                    int lastProcessedLine = getLastProcessedLine(conn, fileNameWithExtension);
+
+                    // Parse CSV and get new records
+                    List<CSVRecord> newRecords = parseNewCsvRecords(filePath, lastProcessedLine);
+
+                    if (newRecords.isEmpty()) {
+                        logger.info("No new records to process in file: {}", fileNameWithExtension);
+                        keepProcessing = false;
+                        continue;
+                    }
+
+                    // Insert records into the database
+                    int processedCount = 0;
+                    for (CSVRecord record : newRecords) {
+                        try {
+                            insertRecordIntoDatabase(conn, record, fileNameWithExtension);
+                            processedCount++;
+                        } catch (SQLException e) {
+                            logError("Failed to insert record at line " + record.getRecordNumber() + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                        }
+                    }
+
+                    // Update last processed line
+                    updateLastProcessedLine(conn, fileNameWithExtension, lastProcessedLine + processedCount);
+
+                    // Commit transaction
+                    conn.commit();
+                    logger.info("Successfully processed {} records from file: {}", processedCount, fileNameWithExtension);
+
+                } catch (Exception e) {
+                    // Rollback transaction on error
+                    conn.rollback();
+                    logError("Error processing file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                    keepProcessing = false; // Stop processing on error
+                } finally {
+                    // Restore auto-commit
+                    conn.setAutoCommit(true);
+                }
+
+            } catch (SQLException e) {
+                logError("Failed to process file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                keepProcessing = false; // Stop processing on error
+            }
+        }
+    }
+
+    /**
+     * Retrieves the last processed line number for a given file from the database.
+     *
+     * @param conn     The database connection.
+     * @param fileName The name of the file.
+     * @return The last processed line number.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static int getLastProcessedLine(Connection conn, String fileName) throws SQLException {
+        String query = "SELECT last_processed_line FROM file_progress WHERE file_name = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setString(1, fileName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    int line = rs.getInt("last_processed_line");
+                    logger.debug("Last processed line for file {}: {}", fileName, line);
+                    return line;
+                }
+            }
+        }
+        logger.debug("No previous processing record found for file {}. Starting from line 0.", fileName);
+        return 0;  // Start from the beginning if not found
+    }
+
+    /**
+     * Updates the last processed line number for a given file in the database.
+     *
+     * @param conn             The database connection.
+     * @param fileName         The name of the file.
+     * @param newLastProcessed The new last processed line number.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void updateLastProcessedLine(Connection conn, String fileName, int newLastProcessed) throws SQLException {
+        String query = "INSERT INTO file_progress (file_name, last_processed_line) VALUES (?, ?) " +
+                "ON CONFLICT (file_name) DO UPDATE SET last_processed_line = EXCLUDED.last_processed_line";
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setString(1, fileName);
+            stmt.setInt(2, newLastProcessed);
+            stmt.executeUpdate();
+            logger.debug("Updated last processed line for file {} to {}", fileName, newLastProcessed);
+        }
+    }
+
+    /**
+     * Parses new CSV records from the file starting from the specified line.
+     *
+     * @param filePath          The path to the CSV file.
+     * @param lastProcessedLine The last processed line number.
+     * @return A list of new CSV records.
+     * @throws IOException If an I/O error occurs.
+     */
+    private static List<CSVRecord> parseNewCsvRecords(Path filePath, int lastProcessedLine) throws IOException {
+        try (Reader reader = Files.newBufferedReader(filePath);
+             CSVParser csvParser = new CSVParser(reader, CSVFormat.DEFAULT
+                     .withDelimiter(';')
+                     .withIgnoreHeaderCase()
+                     .withTrim())) {
+
+            List<CSVRecord> records = csvParser.getRecords();
+            if (lastProcessedLine >= records.size()) {
+                return List.of();  // No new records
+            }
+            return records.subList(lastProcessedLine, records.size());
+        }
+    }
+
+    /**
+     * Inserts a single CSV record into the siusdata_shots table.
+     *
+     * @param conn                  The database connection.
+     * @param record                The CSV record to insert.
+     * @param fileNameWithExtension The name of the file being processed.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void insertRecordIntoDatabase(Connection conn, CSVRecord record, String fileNameWithExtension) throws SQLException {
+        String query = "INSERT INTO siusdata_shots (" +
+                "filename, start_number, score, phase, target_number, score2, score3, time, " +
+                "is_inner_ten, coordinate_x, coordinate_y, is_in_time, light_phase_time_span, " +
+                "is_right_sweep, is_demo, shoot_ordinal, practice_ordinal, manual_status, " +
+                "total_kind, group_ordinal, fire_kind, log_event_id, log_type, date, " +
+                "relay, weapon, position, target_code, external_number" +
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            // Parsing and setting fields with validation
+            // Field indices based on CSV column order (0-based)
+
+            // 1. filename of the csv file (TEXT)
+            stmt.setString(1, fileNameWithExtension);
+
+            // 2. start_number (INT) - Column 0
+            setIntegerField(stmt, 2, record.get(0));
+
+            // 3. score (TEXT) - Column 1
+            setTextField(stmt, 3, record.get(1));
+
+            // 4. phase (INT) - Column 2
+            setIntegerField(stmt, 4, record.get(2));
+
+            // 5. target_number (INT) - Column 3
+            setIntegerField(stmt, 5, record.get(3));
+
+            // 6. score2 (TEXT) - Column 4
+            setTextField(stmt, 6, record.get(4));
+
+            // 7. score3 (TEXT) - Column 5
+            setTextField(stmt, 7, record.get(5));
+
+            // 8. time (TEXT) - Column 6
+            setTextField(stmt, 8, record.get(6));
+
+            // 9. is_inner_ten (BOOLEAN) - Column 7
+            setBooleanField(stmt, 9, record.get(7));
+
+            // 10. coordinate_x (TEXT) - Column 8
+            setTextField(stmt, 10, record.get(8));
+
+            // 11. coordinate_y (TEXT) - Column 9
+            setTextField(stmt, 11, record.get(9));
+
+            // 12. is_in_time (BOOLEAN) - Column 10
+            setBooleanField(stmt, 12, record.get(10));
+
+            // 13. light_phase_time_span (TEXT) - Column 11
+            setTextField(stmt, 13, record.get(11));
+
+            // 14. is_right_sweep (BOOLEAN) - Column 12
+            setBooleanField(stmt, 14, record.get(12));
+
+            // 15. is_demo (BOOLEAN) - Column 13
+            setBooleanField(stmt, 15, record.get(13));
+
+            // 16. shoot_ordinal (INT) - Column 14
+            setIntegerField(stmt, 16, record.get(14));
+
+            // 17. practice_ordinal (INT) - Column 15
+            setIntegerField(stmt, 17, record.get(15));
+
+            // 18. manual_status (INT) - Column 16
+            setIntegerField(stmt, 18, record.get(16));
+
+            // 19. total_kind (INT) - Column 17
+            setIntegerField(stmt, 19, record.get(17));
+
+            // 20. group_ordinal (INT) - Column 18
+            setIntegerField(stmt, 20, record.get(18));
+
+            // 21. fire_kind (INT) - Column 19
+            setIntegerField(stmt, 21, record.get(19));
+
+            // 22. log_event_id (BIGINT) - Column 20
+            setLongField(stmt, 22, record.get(20));
+
+            // 23. log_type (INT) - Column 21
+            setIntegerField(stmt, 23, record.get(21));
+
+            // 24. date (TIMESTAMP) - Column 22
+            Timestamp calculatedTimestamp = calculateTimestamp(record.get(22), fileNameWithExtension);
+            if (calculatedTimestamp != null) {
+                stmt.setTimestamp(24, calculatedTimestamp);
+            } else {
+                stmt.setNull(24, Types.TIMESTAMP);
+            }
+
+            // 25. relay (INT) - Column 23
+            setIntegerField(stmt, 25, record.get(23));
+
+            // 26. weapon (INT) - Column 24
+            setIntegerField(stmt, 26, record.get(24));
+
+            // 27. position (INT) - Column 25
+            setIntegerField(stmt, 27, record.get(25));
+
+            // 28. target_code (INT) - Column 26
+            setIntegerField(stmt, 28, record.get(26));
+
+            // 29. external_number (INT) - Column 27
+            setIntegerField(stmt, 29, record.get(27));
+
+            // Execute the insert statement
+            stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Calculates the Timestamp based on the Date field value and the year from the filename.
+     *
+     * @param dateValue The Date field value from CSV.
+     * @param fileName  The name of the file to extract the year.
+     * @return The calculated Timestamp, or null if invalid.
+     */
+    private static Timestamp calculateTimestamp(String dateValue, String fileName) {
+        try {
+            long intervals = Long.parseLong(dateValue.trim());
+            long millisecondsToAdd = intervals * 10;
+
+            // Extract year from filename (first four digits)
+            if (fileName.length() < 4) {
+                logError("Filename '" + fileName + "' is too short to extract year.");
+                throw new IllegalStateException("Should never happen, as only files that match the pattern should be processed!");
+            }
+            String yearStr = fileName.substring(0, 4);
+            int year = Integer.parseInt(yearStr);
+
+            LocalDateTime startOfYear = LocalDateTime.of(year, 1, 1, 0, 0, 0, 0);
+            Instant startOfYearInstant = startOfYear.atZone(ZoneId.systemDefault()).toInstant();
+
+            // Add the milliseconds
+            Instant calculatedInstant = startOfYearInstant.plusMillis(millisecondsToAdd);
+
+            // Convert to Timestamp
+            return Timestamp.from(calculatedInstant);
+        } catch (NumberFormatException e) {
+            logError("Invalid Date value '" + dateValue + "': " + e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Sets an integer field in the PreparedStatement with proper error handling.
+     *
+     * @param stmt     The PreparedStatement.
+     * @param index    The parameter index.
+     * @param valueStr The string value to parse and set.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void setIntegerField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+        try {
+            int value = Integer.parseInt(valueStr.trim());
+            stmt.setInt(index, value);
+        } catch (NumberFormatException e) {
+            String errorMsg = "Invalid integer value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
+            logError(errorMsg, e);
+            stmt.setNull(index, Types.INTEGER);
+        }
+    }
+
+    /**
+     * Sets a long field in the PreparedStatement with proper error handling.
+     *
+     * @param stmt     The PreparedStatement.
+     * @param index    The parameter index.
+     * @param valueStr The string value to parse and set.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void setLongField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+        try {
+            long value = Long.parseLong(valueStr.trim());
+            stmt.setLong(index, value);
+        } catch (NumberFormatException e) {
+            String errorMsg = "Invalid long value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
+            logError(errorMsg, e);
+            stmt.setNull(index, Types.BIGINT);
+        }
+    }
+
+    /**
+     * Sets a boolean field in the PreparedStatement based on "0" or "1".
+     *
+     * @param stmt     The PreparedStatement.
+     * @param index    The parameter index.
+     * @param valueStr The string value to parse and set.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void setBooleanField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+        boolean value = "1".equals(valueStr.trim());
+        stmt.setBoolean(index, value);
+    }
+
+    /**
+     * Sets a text field in the PreparedStatement with proper error handling.
+     *
+     * @param stmt     The PreparedStatement.
+     * @param index    The parameter index.
+     * @param valueStr The string value to set.
+     * @throws SQLException If a database access error occurs.
+     */
+    private static void setTextField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+        if (valueStr != null && !valueStr.trim().isEmpty()) {
+            stmt.setString(index, valueStr.trim());
+        } else {
+            stmt.setNull(index, Types.VARCHAR);
+        }
+    }
+
+    /**
+     * Processes existing CSV files in the directory upon application startup.
+     *
+     * @param directoryPath The path to the directory to scan.
+     */
+    private static void processExistingFiles(Path directoryPath) {
+        logger.info("Scanning directory for existing CSV files to process...");
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directoryPath,
+                path -> Files.isRegularFile(path) && isValidCsvFile(path.getFileName().toString()))
+        ) {
+            for (Path filePath : stream) {
+                String fileName = filePath.getFileName().toString();
+                logger.info("Found existing file to process: {}", fileName);
+                submitFileForProcessing(filePath);
+            }
+        } catch (IOException e) {
+            String dir = directoryPath.toAbsolutePath().toString();
+            logError("Error scanning directory " + dir + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Shuts down the application gracefully.
+     */
+    private static void shutdown() {
+        logger.info("Shutting down application...");
+
+        // Close WatchService
+        if (watchService != null) {
+            try {
+                watchService.close();
+                logger.info("Watch service closed.");
+            } catch (IOException e) {
+                logError("Error closing watch service: " + e.getMessage(), e);
+            }
+        }
+
+        // Shutdown ExecutorService
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+                logger.info("Executor service shutdown complete.");
+            } catch (InterruptedException e) {
+                logger.warn("Interrupted during executor service shutdown.");
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // Close HikariCP DataSource
+        if (dataSource != null) {
+            dataSource.close();
+            logger.info("HikariCP DataSource closed.");
+        }
+
+        logger.info("Application shutdown complete.");
+    }
+
+    /**
+     * Centralized method to log errors and send Pushbullet notifications.
+     *
+     * @param message   The error message to log and send.
+     * @param throwable The throwable associated with the error (can be null).
+     */
+    private static void logError(String message, Throwable throwable) {
+        if (throwable != null) {
+            logger.error(message, throwable);
+            sendPushbulletNotification("SiusData Adapter Error", message + "\n" + Throwables.getStackTraceAsString(throwable));
+        } else {
+            logError(message); // Delegate to the overloaded method
+        }
+    }
+
+    /**
+     * Overloaded method to log errors without a Throwable.
+     *
+     * @param message The error message to log and send.
+     */
+    private static void logError(String message) {
+        logger.error(message);
+        sendPushbulletNotification("SiusData Adapter Error", message);
+    }
+}
