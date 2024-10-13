@@ -73,6 +73,9 @@ public class SiusDataToPostgresAdapter {
 
     public static void main(String[] args) {
         try {
+            // Configure DNS caching
+            configureDNSCaching();
+
             validateEnvironmentVariables();
             initializeDataSource();
             initializeDatabaseSchema();
@@ -109,6 +112,15 @@ public class SiusDataToPostgresAdapter {
             logError("Unexpected error in main method: " + e.getMessage(), e);
             shutdown();
         }
+    }
+
+    /**
+     * Configures DNS caching to reduce dependency on real-time DNS resolution.
+     */
+    private static void configureDNSCaching() {
+        // Set DNS cache TTL to 60 seconds
+        java.security.Security.setProperty("networkaddress.cache.ttl", "60");
+        logger.info("Configured DNS caching with TTL=60 seconds.");
     }
 
     /**
@@ -153,10 +165,14 @@ public class SiusDataToPostgresAdapter {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(JDBC_USER);
         config.setPassword(JDBC_PASSWORD);
-        config.setMaximumPoolSize(3); // Adjust as needed
-        config.setMinimumIdle(2); // Adjust as needed
+        config.setMaximumPoolSize(2);
+        config.setMinimumIdle(1);
         config.setIdleTimeout(300_000); // 5 minutes
-        config.setMaxLifetime(1_800_000); // 30 minutes
+        config.setMaxLifetime(600_000); // 10 minutes
+        config.setConnectionTimeout(30_000); // 30 seconds
+        config.setValidationTimeout(5_000); // 5 seconds
+        config.setConnectionTestQuery("SELECT 1");
+        config.setKeepaliveTime(300_000); // 5 minutes
         config.setPoolName("SiusDataHikariCP");
 
         dataSource = new HikariDataSource(config);
@@ -342,17 +358,37 @@ public class SiusDataToPostgresAdapter {
         boolean isQueued = queuedFiles.add(fileName);
         if (isQueued) {
             logger.info("Enqueued file {} for processing.", fileName);
-            executorService.submit(() -> {
-                try {
-                    processFile(filePath);
-                } finally {
-                    // Remove the file from queuedFiles after processing
-                    queuedFiles.remove(fileName);
-                    logger.info("Finished processing file: {}", fileName);
-                }
-            });
+            executorService.submit(() -> processFileWithRetries(filePath));
         } else {
             logger.info("File {} is already queued or being processed. Skipping submission.", fileName);
+        }
+    }
+
+    /**
+     * Processes a single CSV file with infinite retry logic.
+     * Retries indefinitely with a fixed 5-second wait between attempts.
+     *
+     * @param filePath The path to the CSV file.
+     */
+    private static void processFileWithRetries(Path filePath) {
+        String fileName = filePath.getFileName().toString();
+        while (true) {
+            try {
+                processFile(filePath);
+                queuedFiles.remove(fileName);
+                logger.info("Successfully processed file: {}", fileName);
+                break; // Exit loop on success
+            } catch (Exception e) {
+                logError("Failed to process file " + fileName + ": " + e.getMessage(), e);
+                try {
+                    logger.info("Waiting for 5000 milliseconds before retrying...");
+                    Thread.sleep(5_000); // Fixed 5-second wait
+                } catch (InterruptedException ie) {
+                    logger.warn("Retry sleep interrupted.");
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
     }
 
@@ -362,7 +398,7 @@ public class SiusDataToPostgresAdapter {
      *
      * @param filePath The path to the CSV file.
      */
-    private static void processFile(Path filePath) {
+    private static void processFile(Path filePath) throws SQLException, IOException {
         String fileNameWithExtension = filePath.getFileName().toString();
         logger.info("Started processing file: {}", fileNameWithExtension);
 
@@ -408,7 +444,7 @@ public class SiusDataToPostgresAdapter {
                     // Rollback transaction on error
                     conn.rollback();
                     logError("Error processing file " + fileNameWithExtension + ": " + e.getMessage(), e);
-                    keepProcessing = false; // Stop processing on error
+                    throw e; // Rethrow to trigger retry
                 } finally {
                     // Restore auto-commit
                     conn.setAutoCommit(true);
@@ -416,7 +452,7 @@ public class SiusDataToPostgresAdapter {
 
             } catch (SQLException e) {
                 logError("Failed to process file " + fileNameWithExtension + ": " + e.getMessage(), e);
-                keepProcessing = false; // Stop processing on error
+                throw e; // Rethrow to trigger retry
             }
         }
     }
