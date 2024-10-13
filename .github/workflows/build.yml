@@ -35,4 +35,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: native-windows-image
-          path: build/native/nativeCompile/*.exe
+          path: build/native/nativeCompile/*
