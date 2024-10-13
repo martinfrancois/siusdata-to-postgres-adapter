@@ -51,7 +51,7 @@ public class SiusDataToPostgresAdapter {
 
     // Configuration properties from environment variables
     private static final String DIRECTORY_TO_WATCH = System.getenv("CSV_MONITOR_PATH");
-    private static final String JDBC_URL = System.getenv("POSTGRESQL_URL");
+    private static String jdbcUrl = System.getenv("POSTGRESQL_URL");
     private static final String JDBC_USER = System.getenv("POSTGRESQL_USER");
     private static final String JDBC_PASSWORD = System.getenv("POSTGRESQL_PASSWORD");
     private static final String PUSHBULLET_API_KEY = System.getenv("PUSHBULLET_API_KEY");
@@ -120,9 +120,15 @@ public class SiusDataToPostgresAdapter {
             logger.error("Environment variable CSV_MONITOR_PATH is not set.");
             System.exit(1);
         }
-        if (JDBC_URL == null || JDBC_URL.isEmpty()) {
+        if (jdbcUrl == null || jdbcUrl.isEmpty()) {
             logger.error("Environment variable POSTGRESQL_URL is not set.");
             System.exit(1);
+        }
+        if (!jdbcUrl.startsWith("jdbc:")) {
+            jdbcUrl = "jdbc:" + jdbcUrl;
+        }
+        if (!jdbcUrl.startsWith("jdbc:postgresql://")) {
+            logger.error("Database URL defined in POSTGRESQL_URL must start with either postgresql:// or jdbc:postgresql://");
         }
         if (JDBC_USER == null || JDBC_USER.isEmpty()) {
             logger.error("Environment variable POSTGRESQL_USER is not set.");
@@ -143,7 +149,7 @@ public class SiusDataToPostgresAdapter {
      */
     private static void initializeDataSource() {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(JDBC_URL);
+        config.setJdbcUrl(jdbcUrl);
         config.setUsername(JDBC_USER);
         config.setPassword(JDBC_PASSWORD);
         config.setMaximumPoolSize(3); // Adjust as needed
