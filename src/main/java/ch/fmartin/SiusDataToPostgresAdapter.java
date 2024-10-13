@@ -129,6 +129,7 @@ public class SiusDataToPostgresAdapter {
         }
         if (!jdbcUrl.startsWith("jdbc:postgresql://")) {
             logger.error("Database URL defined in POSTGRESQL_URL must start with either postgresql:// or jdbc:postgresql://");
+            System.exit(1);
         }
         if (JDBC_USER == null || JDBC_USER.isEmpty()) {
             logger.error("Environment variable POSTGRESQL_USER is not set.");
