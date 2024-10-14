@@ -8,12 +8,13 @@
         </encoder>
     </appender>
 
-    <!-- File Appender with Rolling Policy -->
+    <!-- File Appender with Size and Time Based Rolling Policy -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/siusdata-adapter.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <!-- daily rollover -->
-            <fileNamePattern>logs/siusdata-adapter.%d{yyyy-MM-dd}.log</fileNamePattern>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- Rollover daily or when the file exceeds 10MB -->
+            <fileNamePattern>logs/siusdata-adapter.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>3GB</totalSizeCap>
         </rollingPolicy>
