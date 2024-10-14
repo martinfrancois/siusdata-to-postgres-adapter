@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       # Step 1: Check out the repository
@@ -28,7 +28,7 @@ jobs:
       # Step 4: Build the native image using Gradle with cross-compilation for Windows
       - name: Build Native Image for Windows
         run: |
-          ./gradlew nativeCompile -PtargetPlatform=windows
+          ./gradlew nativeCompile
 
       # Step 5: Upload the native image artifact (Windows binary)
       - name: Upload Native Image Artifact
