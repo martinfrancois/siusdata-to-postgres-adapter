@@ -31,6 +31,9 @@ dependencies {
     // CSV Parsing
     implementation("de.siegmar:fastcsv:3.3.1")
 
+    // JSON Handling
+    implementation("org.json:json:20240303")
+
     // Testing
     testImplementation(platform("org.junit:junit-bom:5.10.5"))
     testImplementation("org.junit.jupiter:junit-jupiter")

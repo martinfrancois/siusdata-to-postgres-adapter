@@ -5,10 +5,14 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import de.siegmar.fastcsv.reader.CsvReader;
 import de.siegmar.fastcsv.reader.CsvRecord;
+import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.ClosedWatchServiceException;
@@ -248,38 +252,52 @@ public class SiusDataToPostgresAdapter {
             return;
         }
 
+        HttpURLConnection conn = null;
         try {
             URL url = new URL("https://api.pushbullet.com/v2/pushes");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Access-Token", PUSHBULLET_API_KEY);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
 
-            String payload = String.format("{\"type\": \"note\", \"title\": \"SiusData Adapter: %s\", \"body\": \"%s\"}", escapeJson(title), escapeJson(message));
-            conn.getOutputStream().write(payload.getBytes("UTF-8"));
+            // Create the JSON payload
+            JSONObject json = new JSONObject();
+            json.put("type", "note");
+            json.put("title", title);
+            json.put("body", message);
+
+            // Using try-with-resources for OutputStream
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(json.toString().getBytes("UTF-8"));
+            }
 
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
                 logger.error("Failed to send Pushbullet notification. Response Code: {}", responseCode);
+
+                // Using try-with-resources for BufferedReader to read the error response body
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {
+                    StringBuilder responseBody = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        responseBody.append(line);
+                    }
+                    logger.error("Response body: {}", responseBody.toString());
+                } catch (IOException e) {
+                    logger.error("Error reading response body: {}", e.getMessage(), e);
+                }
             } else {
                 logger.debug("Pushbullet notification sent successfully.");
             }
 
-            conn.disconnect();
         } catch (IOException e) {
             logger.error("Error sending Pushbullet notification: {}", e.getMessage(), e);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
-    }
-
-    /**
-     * Escapes JSON special characters in strings.
-     *
-     * @param text The input text.
-     * @return The escaped text.
-     */
-    private static String escapeJson(String text) {
-        return text.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     /**
