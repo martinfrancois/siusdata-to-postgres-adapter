@@ -38,6 +38,11 @@ jobs:
       - name: Build Native Image for Windows
         run: .\gradlew nativeCompile
 
+      - name: Zip Native Executable and DLLs
+        run: |
+          $zipFile = "build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip"
+          Compress-Archive -Path "build/native/nativeCompile/siusdata-to-postgres-adapter*.exe", "build/native/nativeCompile/*.dll" -DestinationPath $zipFile
+
       - name: Get current date
         id: date
         shell: pwsh
@@ -52,7 +57,7 @@ jobs:
           name: Release ${{ steps.date.outputs.date }}
           files: |
             build/libs/siusdata-to-postgres-adapter*.jar
-            build/native/nativeCompile/siusdata-to-postgres-adapter*.exe
+            build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
