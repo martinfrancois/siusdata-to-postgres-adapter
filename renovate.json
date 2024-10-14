@@ -10,6 +10,16 @@
     {
       "matchUpdateTypes": ["patch"],
       "automerge": true
+    },
+    {
+      "groupName": "Testing",
+      "matchPackagePrefixes": [
+        "org.mockito",
+        "org.junit",
+        "org.testcontainers",
+        "com.github.stefanbirkner",
+        "org.awaitility"
+      ]
     }
   ]
 }

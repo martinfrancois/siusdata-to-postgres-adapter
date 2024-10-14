@@ -35,12 +35,23 @@ dependencies {
     implementation("org.json:json:20240303")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.10.5"))
+    testImplementation(platform("org.junit:junit-bom:5.11.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.14.1")
+    testImplementation("org.testcontainers:testcontainers:1.20.2")
+    testImplementation("org.testcontainers:junit-jupiter:1.20.2")
+    testImplementation("org.testcontainers:postgresql:1.20.2")
+    testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
+    testImplementation("org.awaitility:awaitility:4.2.2")
 }
 
 tasks.test {
     useJUnitPlatform()
+    // fix for: "Unable to make field private final java.util.Map java.util.Collections$UnmodifiableMap.m accessible: module java.base does not "opens java.util" to unnamed module"
+    jvmArgs = listOf(
+        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+        "--add-opens", "java.base/java.util=ALL-UNNAMED"
+    )
 }
 
 graalvmNative {
