@@ -11,7 +11,9 @@ import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.WatchService;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -240,7 +242,7 @@ public class SiusDataToPostgresAdapterTest {
     @Test
     void testSubmitFileForProcessing_NewFile() {
         // given
-        Path filePath = Paths.get("test_directory/testfile.csv");
+        Path filePath = Path.of("test_directory/testfile.csv");
 
         // when
         adapter.submitFileForProcessing(filePath, false);
@@ -253,7 +255,7 @@ public class SiusDataToPostgresAdapterTest {
     @Test
     void testSubmitFileForProcessing_AlreadyQueued() {
         // given
-        Path filePath = Paths.get("test_directory/testfile.csv");
+        Path filePath = Path.of("test_directory/testfile.csv");
 
         // Simulate the file is already queued by submitting it once
         adapter.submitFileForProcessing(filePath, false);
@@ -603,7 +605,7 @@ public class SiusDataToPostgresAdapterTest {
     @Test
     void testProcessFileWithRetries_FailureThenSuccess() throws Exception {
         // given
-        Path filePath = Paths.get("testfile.csv");
+        Path filePath = Path.of("testfile.csv");
         SiusDataToPostgresAdapter spyAdapter = spy(adapter);
 
         IOException exception = new IOException("Test exception");
@@ -660,7 +662,7 @@ public class SiusDataToPostgresAdapterTest {
                 csvRecords.add(csvRecord);
             }
         }
-        CsvRecord csvRecord = csvRecords.get(0);
+        CsvRecord csvRecord = csvRecords.getFirst();
 
         // when
         adapter.insertRecordIntoDatabase(mockConnection, csvRecord, "20210000.csv");
@@ -679,7 +681,7 @@ public class SiusDataToPostgresAdapterTest {
     void testProcessFile_Exception() throws Exception {
         // given
         Path filePath = mock(Path.class);
-        when(filePath.getFileName()).thenReturn(Paths.get("20210000.csv"));
+        when(filePath.getFileName()).thenReturn(Path.of("20210000.csv"));
         when(dataSource.getConnection()).thenThrow(new SQLException("Test exception"));
 
         // when

@@ -3,6 +3,7 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
+    id("org.openrewrite.rewrite") version "6.25.0"
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("org.graalvm.buildtools.native") version "0.10.3"
     id("application")
@@ -43,6 +44,9 @@ dependencies {
     testImplementation("org.testcontainers:postgresql:1.20.2")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.2.2")
+
+    // OpenRewrite
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:2.26.1")
 }
 
 tasks.test {
@@ -62,4 +66,8 @@ graalvmNative {
 
 tasks.shadowJar {
     archiveFileName.set("siusdata-to-postgres-adapter.jar")
+}
+
+rewrite {
+    activeRecipe("org.openrewrite.java.migrate.UpgradeToJava21")
 }
