@@ -704,7 +704,7 @@ public class SiusDataToPostgresAdapter {
         try {
             int value = Integer.parseInt(valueStr.trim());
             stmt.setInt(index, value);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | NullPointerException e) {
             String errorMsg = "Invalid integer value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
             logError(errorMsg, e);
             stmt.setNull(index, Types.INTEGER);
@@ -723,7 +723,7 @@ public class SiusDataToPostgresAdapter {
         try {
             long value = Long.parseLong(valueStr.trim());
             stmt.setLong(index, value);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | NullPointerException e) {
             String errorMsg = "Invalid long value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
             logError(errorMsg, e);
             stmt.setNull(index, Types.BIGINT);
@@ -739,8 +739,14 @@ public class SiusDataToPostgresAdapter {
      * @throws SQLException If a database access error occurs.
      */
     private static void setBooleanField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
-        boolean value = "1".equals(valueStr.trim());
-        stmt.setBoolean(index, value);
+        if (valueStr != null) {
+            boolean value = "1".equals(valueStr.trim());
+            stmt.setBoolean(index, value);
+        } else {
+            String errorMsg = "Missing boolean value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
+            logError(errorMsg);
+            stmt.setNull(index, Types.BOOLEAN);
+        }
     }
 
     /**
@@ -755,6 +761,8 @@ public class SiusDataToPostgresAdapter {
         if (valueStr != null && !valueStr.trim().isEmpty()) {
             stmt.setString(index, valueStr.trim());
         } else {
+            String errorMsg = "Missing String value '" + valueStr + "' for parameter index " + index + ". Setting NULL.";
+            logError(errorMsg);
             stmt.setNull(index, Types.VARCHAR);
         }
     }
