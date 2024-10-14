@@ -1,8 +1,7 @@
 name: Build
 
 on:
-  push: # Trigger for all branches
-  pull_request:
+  push:
 
 jobs:
   release-jar:
