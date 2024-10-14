@@ -3,14 +3,12 @@ package ch.fmartin;
 import com.google.common.base.Throwables;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVParser;
-import org.apache.commons.csv.CSVRecord;
+import de.siegmar.fastcsv.reader.CsvReader;
+import de.siegmar.fastcsv.reader.CsvRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.ClosedWatchServiceException;
@@ -33,6 +31,7 @@ import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -414,7 +413,7 @@ public class SiusDataToPostgresAdapter {
                     int lastProcessedLine = getLastProcessedLine(conn, fileNameWithExtension);
 
                     // Parse CSV and get new records
-                    List<CSVRecord> newRecords = parseNewCsvRecords(filePath, lastProcessedLine);
+                    List<CsvRecord> newRecords = parseNewCsvRecords(filePath, lastProcessedLine);
 
                     if (newRecords.isEmpty()) {
                         logger.info("No new records to process in file: {}", fileNameWithExtension);
@@ -424,12 +423,12 @@ public class SiusDataToPostgresAdapter {
 
                     // Insert records into the database
                     int processedCount = 0;
-                    for (CSVRecord record : newRecords) {
+                    for (CsvRecord record : newRecords) {
                         try {
                             insertRecordIntoDatabase(conn, record, fileNameWithExtension);
                             processedCount++;
                         } catch (SQLException e) {
-                            logError("Failed to insert record at line " + record.getRecordNumber() + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                            logError("Failed to insert record at line " + (lastProcessedLine + processedCount) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
                         }
                     }
 
@@ -508,19 +507,19 @@ public class SiusDataToPostgresAdapter {
      * @return A list of new CSV records.
      * @throws IOException If an I/O error occurs.
      */
-    private static List<CSVRecord> parseNewCsvRecords(Path filePath, int lastProcessedLine) throws IOException {
-        try (Reader reader = Files.newBufferedReader(filePath);
-             CSVParser csvParser = new CSVParser(reader, CSVFormat.DEFAULT
-                     .withDelimiter(';')
-                     .withIgnoreHeaderCase()
-                     .withTrim())) {
+    private static List<CsvRecord> parseNewCsvRecords(Path filePath, int lastProcessedLine) throws IOException {
+        List<CsvRecord> list = new ArrayList<>();
+        try (CsvReader<CsvRecord> csv = CsvReader.builder().fieldSeparator(';').ofCsvRecord(filePath)) {
+            int lineCounter = 0;
+            for (final CsvRecord csvRecord : csv) {
+                if (lineCounter++ < lastProcessedLine) {
+                    continue;  // Skip already processed lines
+                }
 
-            List<CSVRecord> records = csvParser.getRecords();
-            if (lastProcessedLine >= records.size()) {
-                return List.of();  // No new records
+                list.add(csvRecord);
             }
-            return records.subList(lastProcessedLine, records.size());
         }
+        return list;
     }
 
     /**
@@ -531,7 +530,7 @@ public class SiusDataToPostgresAdapter {
      * @param fileNameWithExtension The name of the file being processed.
      * @throws SQLException If a database access error occurs.
      */
-    private static void insertRecordIntoDatabase(Connection conn, CSVRecord record, String fileNameWithExtension) throws SQLException {
+    private static void insertRecordIntoDatabase(Connection conn, CsvRecord record, String fileNameWithExtension) throws SQLException {
         String query = "INSERT INTO siusdata_shots (" +
                 "filename, start_number, score, phase, target_number, score2, score3, time, " +
                 "is_inner_ten, coordinate_x, coordinate_y, is_in_time, light_phase_time_span, " +
@@ -548,73 +547,73 @@ public class SiusDataToPostgresAdapter {
             stmt.setString(1, fileNameWithExtension);
 
             // 2. start_number (INT) - Column 0
-            setIntegerField(stmt, 2, record.get(0));
+            setIntegerField(stmt, 2, record.getField(0));
 
             // 3. score (TEXT) - Column 1
-            setTextField(stmt, 3, record.get(1));
+            setTextField(stmt, 3, record.getField(1));
 
             // 4. phase (INT) - Column 2
-            setIntegerField(stmt, 4, record.get(2));
+            setIntegerField(stmt, 4, record.getField(2));
 
             // 5. target_number (INT) - Column 3
-            setIntegerField(stmt, 5, record.get(3));
+            setIntegerField(stmt, 5, record.getField(3));
 
             // 6. score2 (TEXT) - Column 4
-            setTextField(stmt, 6, record.get(4));
+            setTextField(stmt, 6, record.getField(4));
 
             // 7. score3 (TEXT) - Column 5
-            setTextField(stmt, 7, record.get(5));
+            setTextField(stmt, 7, record.getField(5));
 
             // 8. time (TEXT) - Column 6
-            setTextField(stmt, 8, record.get(6));
+            setTextField(stmt, 8, record.getField(6));
 
             // 9. is_inner_ten (BOOLEAN) - Column 7
-            setBooleanField(stmt, 9, record.get(7));
+            setBooleanField(stmt, 9, record.getField(7));
 
             // 10. coordinate_x (TEXT) - Column 8
-            setTextField(stmt, 10, record.get(8));
+            setTextField(stmt, 10, record.getField(8));
 
             // 11. coordinate_y (TEXT) - Column 9
-            setTextField(stmt, 11, record.get(9));
+            setTextField(stmt, 11, record.getField(9));
 
             // 12. is_in_time (BOOLEAN) - Column 10
-            setBooleanField(stmt, 12, record.get(10));
+            setBooleanField(stmt, 12, record.getField(10));
 
             // 13. light_phase_time_span (TEXT) - Column 11
-            setTextField(stmt, 13, record.get(11));
+            setTextField(stmt, 13, record.getField(11));
 
             // 14. is_right_sweep (BOOLEAN) - Column 12
-            setBooleanField(stmt, 14, record.get(12));
+            setBooleanField(stmt, 14, record.getField(12));
 
             // 15. is_demo (BOOLEAN) - Column 13
-            setBooleanField(stmt, 15, record.get(13));
+            setBooleanField(stmt, 15, record.getField(13));
 
             // 16. shoot_ordinal (INT) - Column 14
-            setIntegerField(stmt, 16, record.get(14));
+            setIntegerField(stmt, 16, record.getField(14));
 
             // 17. practice_ordinal (INT) - Column 15
-            setIntegerField(stmt, 17, record.get(15));
+            setIntegerField(stmt, 17, record.getField(15));
 
             // 18. manual_status (INT) - Column 16
-            setIntegerField(stmt, 18, record.get(16));
+            setIntegerField(stmt, 18, record.getField(16));
 
             // 19. total_kind (INT) - Column 17
-            setIntegerField(stmt, 19, record.get(17));
+            setIntegerField(stmt, 19, record.getField(17));
 
             // 20. group_ordinal (INT) - Column 18
-            setIntegerField(stmt, 20, record.get(18));
+            setIntegerField(stmt, 20, record.getField(18));
 
             // 21. fire_kind (INT) - Column 19
-            setIntegerField(stmt, 21, record.get(19));
+            setIntegerField(stmt, 21, record.getField(19));
 
             // 22. log_event_id (BIGINT) - Column 20
-            setLongField(stmt, 22, record.get(20));
+            setLongField(stmt, 22, record.getField(20));
 
             // 23. log_type (INT) - Column 21
-            setIntegerField(stmt, 23, record.get(21));
+            setIntegerField(stmt, 23, record.getField(21));
 
             // 24. date (TIMESTAMP) - Column 22
-            Timestamp calculatedTimestamp = calculateTimestamp(record.get(22), fileNameWithExtension);
+            Timestamp calculatedTimestamp = calculateTimestamp(record.getField(22), fileNameWithExtension);
             if (calculatedTimestamp != null) {
                 stmt.setTimestamp(24, calculatedTimestamp);
             } else {
@@ -622,19 +621,19 @@ public class SiusDataToPostgresAdapter {
             }
 
             // 25. relay (INT) - Column 23
-            setIntegerField(stmt, 25, record.get(23));
+            setIntegerField(stmt, 25, record.getField(23));
 
             // 26. weapon (INT) - Column 24
-            setIntegerField(stmt, 26, record.get(24));
+            setIntegerField(stmt, 26, record.getField(24));
 
             // 27. position (INT) - Column 25
-            setIntegerField(stmt, 27, record.get(25));
+            setIntegerField(stmt, 27, record.getField(25));
 
             // 28. target_code (INT) - Column 26
-            setIntegerField(stmt, 28, record.get(26));
+            setIntegerField(stmt, 28, record.getField(26));
 
             // 29. external_number (INT) - Column 27
-            setIntegerField(stmt, 29, record.get(27));
+            setIntegerField(stmt, 29, record.getField(27));
 
             // Execute the insert statement
             stmt.executeUpdate();

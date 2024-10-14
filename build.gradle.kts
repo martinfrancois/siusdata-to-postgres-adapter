@@ -29,7 +29,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.10")
 
     // CSV Parsing
-    implementation("org.apache.commons:commons-csv:1.12.0")
+    implementation("de.siegmar:fastcsv:3.3.1")
 
     // Testing
     testImplementation(platform("org.junit:junit-bom:5.10.5"))
