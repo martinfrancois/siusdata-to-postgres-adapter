@@ -2,13 +2,14 @@ group = "ch.fmartin"
 version = "1.0-SNAPSHOT"
 
 plugins {
-    id("org.graalvm.buildtools.native") version "0.10.3"  // GraalVM native-image plugin version 0.10.3
     id("java")
+    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("org.graalvm.buildtools.native") version "0.10.3"
     id("application")
 }
 
 application {
-    mainClass.set("ch.fmartin.SiusDataToPostgresAdapter")  // Replace with your main class
+    mainClass.set("ch.fmartin.SiusDataToPostgresAdapter")
 }
 
 repositories {
@@ -43,4 +44,8 @@ graalvmNative {
     binaries.all {
         resources.autodetect()
     }
+}
+
+tasks.shadowJar {
+    archiveFileName.set("siusdata-to-postgres-adapter.jar")
 }
