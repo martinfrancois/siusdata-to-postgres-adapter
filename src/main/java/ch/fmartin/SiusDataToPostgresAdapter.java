@@ -15,33 +15,16 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.file.ClosedWatchServiceException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardWatchEventKinds;
-import java.nio.file.WatchEvent;
-import java.nio.file.WatchKey;
-import java.nio.file.WatchService;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
-import java.sql.Types;
+import java.nio.file.*;
+import java.sql.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
@@ -50,46 +33,125 @@ import java.util.regex.Pattern;
  */
 public class SiusDataToPostgresAdapter {
 
-    private static final Logger logger = LoggerFactory.getLogger(SiusDataToPostgresAdapter.class);
-
     // Configuration properties from environment variables
-    private static final String DIRECTORY_TO_WATCH = System.getenv("CSV_MONITOR_PATH");
-    private static String jdbcUrl = System.getenv("POSTGRESQL_URL");
-    private static final String JDBC_USER = System.getenv("POSTGRESQL_USER");
-    private static final String JDBC_PASSWORD = System.getenv("POSTGRESQL_PASSWORD");
-    private static final String PUSHBULLET_API_KEY = System.getenv("PUSHBULLET_API_KEY");
+    private final String directoryToWatch;
+    private String jdbcUrl;
+    private final String jdbcUser;
+    private final String jdbcPassword;
+    private final String pushbulletApiKey;
 
-    // Single-threaded executor for processing files sequentially
-    private static ExecutorService executorService;
-
-    // Connection pool to database
-    private static HikariDataSource dataSource;
-
-    // WatchService to monitor directory
-    private static WatchService watchService;
+    // Dependencies
+    private final Logger logger;
+    private final ExecutorService executorService;
+    private final HikariDataSource dataSource;
+    private final WatchService watchService;
 
     // Set to track files that are already queued or being processed
-    private static final Set<String> queuedFiles = ConcurrentHashMap.newKeySet();
+    private final Set<String> queuedFiles = ConcurrentHashMap.newKeySet();
 
     // CSV file must start with eight digits, can be followed by anything, must end with .csv
     private static final Pattern CSV_FILE_PATTERN = Pattern.compile("^\\d{8}.*\\.csv$", Pattern.CASE_INSENSITIVE);
 
-    public static void main(String[] args) {
+    // is true when it has processed all existing files upon startup
+    private boolean initialized = false;
+
+    // is true when it is watching file changes in the folder
+    private boolean watching = false;
+
+    // is true when it is currently reading the csv and writing it to the db
+    private boolean processing = false;
+
+    private final AtomicInteger existingFilesTaskCount = new AtomicInteger(0);
+
+    /**
+     * Default constructor that initializes all dependencies internally.
+     */
+    public SiusDataToPostgresAdapter() {
+        this.logger = LoggerFactory.getLogger(SiusDataToPostgresAdapter.class);
+
+        // Configure DNS caching
+        configureDNSCaching();
+
+        // Validate and load environment variables
+        this.directoryToWatch = System.getenv("CSV_MONITOR_PATH");
+        this.jdbcUrl = System.getenv("POSTGRESQL_URL");
+        this.jdbcUser = System.getenv("POSTGRESQL_USER");
+        this.jdbcPassword = System.getenv("POSTGRESQL_PASSWORD");
+        this.pushbulletApiKey = System.getenv("PUSHBULLET_API_KEY");
+
+        validateEnvironmentVariables();
+
+        // Initialize DataSource
+        this.dataSource = initializeDataSource();
+
+        // Initialize database schema
+        initializeDatabaseSchema();
+
+        // Initialize single-threaded Executor Service
+        this.executorService = Executors.newSingleThreadExecutor();
+        logger.info("Initialized single-threaded executor for file processing.");
+
+        // Initialize WatchService
         try {
-            // Configure DNS caching
-            configureDNSCaching();
+            this.watchService = FileSystems.getDefault().newWatchService();
+        } catch (IOException e) {
+            logError("Failed to initialize WatchService: " + e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+    }
 
-            validateEnvironmentVariables();
-            initializeDataSource();
-            initializeDatabaseSchema();
+    /**
+     * Overloaded constructor that allows passing in dependencies for testing purposes.
+     *
+     * @param logger           The Logger instance.
+     * @param executorService  The ExecutorService instance.
+     * @param dataSource       The HikariDataSource instance.
+     * @param watchService     The WatchService instance.
+     * @param directoryToWatch The directory path to monitor.
+     * @param jdbcUrl          The JDBC URL for PostgreSQL.
+     * @param jdbcUser         The PostgreSQL username.
+     * @param jdbcPassword     The PostgreSQL password.
+     * @param pushbulletApiKey The Pushbullet API key.
+     */
+    public SiusDataToPostgresAdapter(Logger logger,
+                                     ExecutorService executorService,
+                                     HikariDataSource dataSource,
+                                     WatchService watchService,
+                                     String directoryToWatch,
+                                     String jdbcUrl,
+                                     String jdbcUser,
+                                     String jdbcPassword,
+                                     String pushbulletApiKey) {
+        this.logger = logger;
+        this.executorService = executorService;
+        this.dataSource = dataSource;
+        this.watchService = watchService;
+        this.directoryToWatch = directoryToWatch;
+        this.jdbcUrl = jdbcUrl;
+        this.jdbcUser = jdbcUser;
+        this.jdbcPassword = jdbcPassword;
+        this.pushbulletApiKey = pushbulletApiKey;
 
-            // Initialize single-threaded Executor Service
-            executorService = Executors.newSingleThreadExecutor();
-            logger.info("Initialized single-threaded executor for file processing.");
+        // No environment variable validation in this constructor to allow flexibility in tests
+    }
 
-            // Initialize WatchService
-            watchService = FileSystems.getDefault().newWatchService();
-            Path directoryPath = Paths.get(DIRECTORY_TO_WATCH);
+    /**
+     * Entry point of the application.
+     *
+     * @param args Command-line arguments.
+     */
+    public static void main(String[] args) {
+        SiusDataToPostgresAdapter adapter = new SiusDataToPostgresAdapter();
+        adapter.start();
+    }
+
+    /**
+     * Starts the adapter by initializing necessary components and beginning directory monitoring.
+     */
+    public void start() {
+        try {
+            // Register directory with WatchService
+            Path directoryPath = Paths.get(directoryToWatch);
 
             // Validate directory
             if (!Files.isDirectory(directoryPath)) {
@@ -98,12 +160,11 @@ public class SiusDataToPostgresAdapter {
                 return;
             }
 
-            // Register directory with WatchService
             directoryPath.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
             logger.info("Monitoring directory: {}", directoryPath.toAbsolutePath());
 
             // Add shutdown hook for graceful shutdown
-            Runtime.getRuntime().addShutdownHook(new Thread(SiusDataToPostgresAdapter::shutdown));
+            Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
 
             // Process existing CSV files upon startup
             processExistingFiles(directoryPath);
@@ -112,7 +173,7 @@ public class SiusDataToPostgresAdapter {
             watchDirectory();
 
         } catch (Exception e) {
-            logError("Unexpected error in main method: " + e.getMessage(), e);
+            logError("Unexpected error in start method: " + e.getMessage(), e);
             shutdown();
         }
     }
@@ -120,7 +181,7 @@ public class SiusDataToPostgresAdapter {
     /**
      * Configures DNS caching to reduce dependency on real-time DNS resolution.
      */
-    private static void configureDNSCaching() {
+    void configureDNSCaching() {
         // Set DNS cache TTL to 60 seconds
         java.security.Security.setProperty("networkaddress.cache.ttl", "60");
         logger.info("Configured DNS caching with TTL=60 seconds.");
@@ -130,44 +191,36 @@ public class SiusDataToPostgresAdapter {
      * Validates that all necessary environment variables are set.
      * Exits the application if any required variable is missing.
      */
-    private static void validateEnvironmentVariables() {
-        if (DIRECTORY_TO_WATCH == null || DIRECTORY_TO_WATCH.isEmpty()) {
+    void validateEnvironmentVariables() {
+        if (directoryToWatch == null) {
             logger.error("Environment variable CSV_MONITOR_PATH is not set.");
-            System.exit(1);
+            throw new IllegalStateException("Environment variable CSV_MONITOR_PATH is not set.");
         }
-        if (jdbcUrl == null || jdbcUrl.isEmpty()) {
+        if (jdbcUrl == null) {
             logger.error("Environment variable POSTGRESQL_URL is not set.");
-            System.exit(1);
+            throw new IllegalStateException("Environment variable POSTGRESQL_URL is not set.");
         }
-        if (!jdbcUrl.startsWith("jdbc:postgresql://")) {
-            if (!jdbcUrl.startsWith("postgresql://")) {
-                logger.error("Database URL defined in POSTGRESQL_URL must start with either postgresql:// or jdbc:postgresql://");
-                System.exit(1);
-            }
-            jdbcUrl = "jdbc:" + jdbcUrl;
-        }
-        if (JDBC_USER == null || JDBC_USER.isEmpty()) {
+        if (jdbcUser == null) {
             logger.error("Environment variable POSTGRESQL_USER is not set.");
-            System.exit(1);
+            throw new IllegalStateException("Environment variable POSTGRESQL_USER is not set.");
         }
-        if (JDBC_PASSWORD == null || JDBC_PASSWORD.isEmpty()) {
+        if (jdbcPassword == null) {
             logger.error("Environment variable POSTGRESQL_PASSWORD is not set.");
-            System.exit(1);
-        }
-        if (PUSHBULLET_API_KEY == null || PUSHBULLET_API_KEY.isEmpty()) {
-            logger.warn("Environment variable PUSHBULLET_API_KEY is not set. Pushbullet notifications will be disabled.");
+            throw new IllegalStateException("Environment variable POSTGRESQL_PASSWORD is not set.");
         }
         logger.info("All required environment variables are set.");
     }
 
     /**
      * Initializes the HikariCP DataSource with a configurable pool size.
+     *
+     * @return Initialized HikariDataSource.
      */
-    private static void initializeDataSource() {
+    HikariDataSource initializeDataSource() {
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(jdbcUrl);
-        config.setUsername(JDBC_USER);
-        config.setPassword(JDBC_PASSWORD);
+        config.setUsername(jdbcUser);
+        config.setPassword(jdbcPassword);
         config.setMaximumPoolSize(2);
         config.setMinimumIdle(1);
         config.setIdleTimeout(300_000); // 5 minutes
@@ -178,15 +231,16 @@ public class SiusDataToPostgresAdapter {
         config.setKeepaliveTime(300_000); // 5 minutes
         config.setPoolName("SiusDataHikariCP");
 
-        dataSource = new HikariDataSource(config);
+        HikariDataSource ds = new HikariDataSource(config);
         logger.info("HikariCP DataSource initialized with pool name '{}', maximum pool size {}.", config.getPoolName(), config.getMaximumPoolSize());
+        return ds;
     }
 
     /**
      * Initializes the database schema by creating necessary tables if they don't exist,
      * including the new 'filename' column in 'siusdata_shots'.
      */
-    private static void initializeDatabaseSchema() {
+    void initializeDatabaseSchema() {
         String createSiusdataShotsTable = "CREATE TABLE IF NOT EXISTS siusdata_shots (" +
                 "id SERIAL PRIMARY KEY," +
                 "filename TEXT," +
@@ -246,8 +300,8 @@ public class SiusDataToPostgresAdapter {
      * @param title   The title of the notification.
      * @param message The message body of the notification.
      */
-    private static void sendPushbulletNotification(String title, String message) {
-        if (PUSHBULLET_API_KEY == null || PUSHBULLET_API_KEY.isEmpty()) {
+    void sendPushbulletNotification(String title, String message) {
+        if (pushbulletApiKey == null || pushbulletApiKey.isEmpty()) {
             logger.debug("Pushbullet API key not set. Skipping notification.");
             return;
         }
@@ -257,7 +311,7 @@ public class SiusDataToPostgresAdapter {
             URL url = new URL("https://api.pushbullet.com/v2/pushes");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
-            conn.setRequestProperty("Access-Token", PUSHBULLET_API_KEY);
+            conn.setRequestProperty("Access-Token", pushbulletApiKey);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
 
@@ -304,8 +358,9 @@ public class SiusDataToPostgresAdapter {
      * Watches the configured directory for CSV file creation and modification events.
      * Submits detected files for processing.
      */
-    private static void watchDirectory() {
+    void watchDirectory() {
         logger.info("Starting directory watch loop.");
+        setWatching(true);
         while (true) {
             WatchKey key;
             try {
@@ -331,13 +386,13 @@ public class SiusDataToPostgresAdapter {
                 // Context for directory entry event is the file name of entry
                 WatchEvent<Path> ev = (WatchEvent<Path>) event;
                 String fileName = ev.context().toString();
-                Path filePath = Paths.get(DIRECTORY_TO_WATCH).resolve(fileName);
+                Path filePath = Paths.get(directoryToWatch).resolve(fileName);
 
                 // Check if the file matches the CSV pattern
                 if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
                     if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
                         logger.info("Detected {} event for file: {}", kind.name(), fileName);
-                        submitFileForProcessing(filePath);
+                        submitFileForProcessing(filePath, false);
                     }
                 } else {
                     logger.debug("Skipping non-matching file or directory: {}", fileName);
@@ -359,7 +414,7 @@ public class SiusDataToPostgresAdapter {
      * @param fileName The name of the file.
      * @return True if it matches, false otherwise.
      */
-    private static boolean isValidCsvFile(String fileName) {
+    boolean isValidCsvFile(String fileName) {
         return CSV_FILE_PATTERN.matcher(fileName).matches();
     }
 
@@ -369,17 +424,39 @@ public class SiusDataToPostgresAdapter {
      *
      * @param filePath The path to the file to process.
      */
-    private static void submitFileForProcessing(Path filePath) {
+    void submitFileForProcessing(Path filePath, boolean isExistingFile) {
         String fileName = filePath.getFileName().toString();
-        // Attempt to add the file to the queuedFiles set
         boolean isQueued = queuedFiles.add(fileName);
+
         if (isQueued) {
             logger.info("Enqueued file {} for processing.", fileName);
-            executorService.submit(() -> processFileWithRetries(filePath));
+
+            // Increment the task counter only for existing files
+            if (isExistingFile) {
+                existingFilesTaskCount.incrementAndGet();
+            }
+
+            executorService.submit(() -> {
+                try {
+                    processFileWithRetries(filePath);
+                } finally {
+                    // Decrement the task counter when the task completes
+                    if (isExistingFile) {
+                        int remainingTasks = existingFilesTaskCount.decrementAndGet();
+
+                        if (remainingTasks == 0) {
+                            // All existing tasks have completed
+                            setInitialized(true);
+                            logger.info("All existing files processed!");
+                        }
+                    }
+                }
+            });
         } else {
             logger.info("File {} is already queued or being processed. Skipping submission.", fileName);
         }
     }
+
 
     /**
      * Processes a single CSV file with infinite retry logic.
@@ -387,11 +464,13 @@ public class SiusDataToPostgresAdapter {
      *
      * @param filePath The path to the CSV file.
      */
-    private static void processFileWithRetries(Path filePath) {
+    void processFileWithRetries(Path filePath) {
         String fileName = filePath.getFileName().toString();
         while (true) {
             try {
+                setProcessing(true);
                 processFile(filePath);
+                setProcessing(false);
                 queuedFiles.remove(fileName);
                 logger.info("Successfully processed file: {}", fileName);
                 break; // Exit loop on success
@@ -415,7 +494,7 @@ public class SiusDataToPostgresAdapter {
      *
      * @param filePath The path to the CSV file.
      */
-    private static void processFile(Path filePath) throws SQLException, IOException {
+    void processFile(Path filePath) throws SQLException, IOException {
         String fileNameWithExtension = filePath.getFileName().toString();
         logger.info("Started processing file: {}", fileNameWithExtension);
 
@@ -446,7 +525,7 @@ public class SiusDataToPostgresAdapter {
                             insertRecordIntoDatabase(conn, record, fileNameWithExtension);
                             processedCount++;
                         } catch (SQLException e) {
-                            logError("Failed to insert record at line " + (lastProcessedLine + processedCount) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                            logError("Failed to insert record at line " + (lastProcessedLine + processedCount + 1) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
                         }
                     }
 
@@ -482,7 +561,7 @@ public class SiusDataToPostgresAdapter {
      * @return The last processed line number.
      * @throws SQLException If a database access error occurs.
      */
-    private static int getLastProcessedLine(Connection conn, String fileName) throws SQLException {
+    int getLastProcessedLine(Connection conn, String fileName) throws SQLException {
         String query = "SELECT last_processed_line FROM file_progress WHERE file_name = ?";
         try (PreparedStatement stmt = conn.prepareStatement(query)) {
             stmt.setString(1, fileName);
@@ -506,7 +585,7 @@ public class SiusDataToPostgresAdapter {
      * @param newLastProcessed The new last processed line number.
      * @throws SQLException If a database access error occurs.
      */
-    private static void updateLastProcessedLine(Connection conn, String fileName, int newLastProcessed) throws SQLException {
+    void updateLastProcessedLine(Connection conn, String fileName, int newLastProcessed) throws SQLException {
         String query = "INSERT INTO file_progress (file_name, last_processed_line) VALUES (?, ?) " +
                 "ON CONFLICT (file_name) DO UPDATE SET last_processed_line = EXCLUDED.last_processed_line";
         try (PreparedStatement stmt = conn.prepareStatement(query)) {
@@ -525,7 +604,7 @@ public class SiusDataToPostgresAdapter {
      * @return A list of new CSV records.
      * @throws IOException If an I/O error occurs.
      */
-    private static List<CsvRecord> parseNewCsvRecords(Path filePath, int lastProcessedLine) throws IOException {
+    List<CsvRecord> parseNewCsvRecords(Path filePath, int lastProcessedLine) throws IOException {
         List<CsvRecord> list = new ArrayList<>();
         try (CsvReader<CsvRecord> csv = CsvReader.builder().fieldSeparator(';').ofCsvRecord(filePath)) {
             int lineCounter = 0;
@@ -548,7 +627,7 @@ public class SiusDataToPostgresAdapter {
      * @param fileNameWithExtension The name of the file being processed.
      * @throws SQLException If a database access error occurs.
      */
-    private static void insertRecordIntoDatabase(Connection conn, CsvRecord record, String fileNameWithExtension) throws SQLException {
+    void insertRecordIntoDatabase(Connection conn, CsvRecord record, String fileNameWithExtension) throws SQLException {
         String query = "INSERT INTO siusdata_shots (" +
                 "filename, start_number, score, phase, target_number, score2, score3, time, " +
                 "is_inner_ten, coordinate_x, coordinate_y, is_in_time, light_phase_time_span, " +
@@ -665,7 +744,7 @@ public class SiusDataToPostgresAdapter {
      * @param fileName  The name of the file to extract the year.
      * @return The calculated Timestamp, or null if invalid.
      */
-    private static Timestamp calculateTimestamp(String dateValue, String fileName) {
+    Timestamp calculateTimestamp(String dateValue, String fileName) {
         try {
             long intervals = Long.parseLong(dateValue.trim());
             long millisecondsToAdd = intervals * 10;
@@ -700,7 +779,7 @@ public class SiusDataToPostgresAdapter {
      * @param valueStr The string value to parse and set.
      * @throws SQLException If a database access error occurs.
      */
-    private static void setIntegerField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+    void setIntegerField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
         try {
             int value = Integer.parseInt(valueStr.trim());
             stmt.setInt(index, value);
@@ -719,7 +798,7 @@ public class SiusDataToPostgresAdapter {
      * @param valueStr The string value to parse and set.
      * @throws SQLException If a database access error occurs.
      */
-    private static void setLongField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+    void setLongField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
         try {
             long value = Long.parseLong(valueStr.trim());
             stmt.setLong(index, value);
@@ -738,8 +817,8 @@ public class SiusDataToPostgresAdapter {
      * @param valueStr The string value to parse and set.
      * @throws SQLException If a database access error occurs.
      */
-    private static void setBooleanField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
-        if (valueStr != null) {
+    void setBooleanField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+        if (valueStr != null && !valueStr.trim().isEmpty()) {
             boolean value = "1".equals(valueStr.trim());
             stmt.setBoolean(index, value);
         } else {
@@ -757,7 +836,7 @@ public class SiusDataToPostgresAdapter {
      * @param valueStr The string value to set.
      * @throws SQLException If a database access error occurs.
      */
-    private static void setTextField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
+    void setTextField(PreparedStatement stmt, int index, String valueStr) throws SQLException {
         if (valueStr != null && !valueStr.trim().isEmpty()) {
             stmt.setString(index, valueStr.trim());
         } else {
@@ -772,26 +851,35 @@ public class SiusDataToPostgresAdapter {
      *
      * @param directoryPath The path to the directory to scan.
      */
-    private static void processExistingFiles(Path directoryPath) {
+    void processExistingFiles(Path directoryPath) {
         logger.info("Scanning directory for existing CSV files to process...");
+        int fileCount = 0;  // Track how many files are found
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directoryPath,
                 path -> Files.isRegularFile(path) && isValidCsvFile(path.getFileName().toString()))
         ) {
             for (Path filePath : stream) {
                 String fileName = filePath.getFileName().toString();
                 logger.info("Found existing file to process: {}", fileName);
-                submitFileForProcessing(filePath);
+                submitFileForProcessing(filePath, true);  // true indicates it's an existing file
+                fileCount++;  // Increment for each file found
             }
         } catch (IOException e) {
             String dir = directoryPath.toAbsolutePath().toString();
             logError("Error scanning directory " + dir + ": " + e.getMessage(), e);
         }
+
+        // If no existing files were found, set initialized to true immediately
+        if (fileCount == 0) {
+            logger.info("No existing files found to process!");
+            setInitialized(true);
+        }
     }
+
 
     /**
      * Shuts down the application gracefully.
      */
-    private static void shutdown() {
+    void shutdown() {
         logger.info("Shutting down application...");
 
         // Close WatchService
@@ -834,7 +922,7 @@ public class SiusDataToPostgresAdapter {
      * @param message   The error message to log and send.
      * @param throwable The throwable associated with the error (can be null).
      */
-    private static void logError(String message, Throwable throwable) {
+    void logError(String message, Throwable throwable) {
         if (throwable != null) {
             logger.error(message, throwable);
             sendPushbulletNotification("SiusData Adapter Error", message + "\n" + Throwables.getStackTraceAsString(throwable));
@@ -848,8 +936,32 @@ public class SiusDataToPostgresAdapter {
      *
      * @param message The error message to log and send.
      */
-    private static void logError(String message) {
+    void logError(String message) {
         logger.error(message);
         sendPushbulletNotification("SiusData Adapter Error", message);
+    }
+
+    public boolean isInitialized() {
+        return initialized;
+    }
+
+    public void setInitialized(boolean initialized) {
+        this.initialized = initialized;
+    }
+
+    public boolean isWatching() {
+        return watching;
+    }
+
+    public void setWatching(boolean watching) {
+        this.watching = watching;
+    }
+
+    public boolean isProcessing() {
+        return processing;
+    }
+
+    public void setProcessing(boolean processing) {
+        this.processing = processing;
     }
 }
