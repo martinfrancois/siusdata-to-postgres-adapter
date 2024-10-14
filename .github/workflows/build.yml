@@ -16,6 +16,7 @@ jobs:
           java-version: '21'      # Java 21 with GraalVM
           distribution: 'graalvm' # GraalVM distribution
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: gradle
 
       # Step 3: Verify GraalVM setup
       - name: Verify GraalVM installation
