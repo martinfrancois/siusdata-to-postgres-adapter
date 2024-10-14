@@ -32,7 +32,7 @@ dependencies {
     implementation("org.apache.commons:commons-csv:1.12.0")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.10.5"))
+    testImplementation(platform("org.junit:junit-bom:5.11.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
 }
 
