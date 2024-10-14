@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.file.*;
 import java.sql.*;
@@ -151,7 +152,7 @@ public class SiusDataToPostgresAdapter {
     public void start() {
         try {
             // Register directory with WatchService
-            Path directoryPath = Paths.get(directoryToWatch);
+            Path directoryPath = Path.of(directoryToWatch);
 
             // Validate directory
             if (!Files.isDirectory(directoryPath)) {
@@ -308,7 +309,7 @@ public class SiusDataToPostgresAdapter {
 
         HttpURLConnection conn = null;
         try {
-            URL url = new URL("https://api.pushbullet.com/v2/pushes");
+            URL url = URI.create("https://api.pushbullet.com/v2/pushes").toURL();
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Access-Token", pushbulletApiKey);
@@ -386,7 +387,7 @@ public class SiusDataToPostgresAdapter {
                 // Context for directory entry event is the file name of entry
                 WatchEvent<Path> ev = (WatchEvent<Path>) event;
                 String fileName = ev.context().toString();
-                Path filePath = Paths.get(directoryToWatch).resolve(fileName);
+                Path filePath = Path.of(directoryToWatch).resolve(fileName);
 
                 // Check if the file matches the CSV pattern
                 if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {

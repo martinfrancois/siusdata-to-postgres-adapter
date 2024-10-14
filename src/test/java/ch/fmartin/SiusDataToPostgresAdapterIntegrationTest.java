@@ -69,8 +69,10 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
                 .execute(() -> {
                     // given
-                    String csvData = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n" +
-                            "244062;10;0;3;10.0;752;17:32:13.05;0;-4.07372;-6.32181;1;655.35;0;0;152;0;0;0;0;0;6;3;2373673305;0;0;0;64;0\n";
+                    String csvData = """
+                            244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0
+                            244062;10;0;3;10.0;752;17:32:13.05;0;-4.07372;-6.32181;1;655.35;0;0;152;0;0;0;0;0;6;3;2373673305;0;0;0;64;0
+                            """;
 
                     String csvFileName = "20231014_test.csv";
                     Path csvFilePath = tempDir.resolve(csvFileName);
@@ -134,8 +136,10 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                             .until(() -> adapter != null && adapter.isWatching() && adapter.isInitialized());
 
                     // Write a new CSV file
-                    String csvData = "244062;10;0;3;10.1;691;17:32:54.90;0;0.83045;-6.86711;1;655.35;0;0;152;0;0;0;0;0;7;3;2373677490;0;0;0;64;0\n" +
-                            "244062;10;0;3;10.0;798;17:33:41.15;0;-7.69908;2.11161;1;655.35;0;0;152;0;0;0;0;0;8;3;2373682115;0;0;0;64;0\n";
+                    String csvData = """
+                            244062;10;0;3;10.1;691;17:32:54.90;0;0.83045;-6.86711;1;655.35;0;0;152;0;0;0;0;0;7;3;2373677490;0;0;0;64;0
+                            244062;10;0;3;10.0;798;17:33:41.15;0;-7.69908;2.11161;1;655.35;0;0;152;0;0;0;0;0;8;3;2373682115;0;0;0;64;0
+                            """;
                     String csvFileName = "20231015_test.csv";
                     Path csvFilePath = tempDir.resolve(csvFileName);
 
@@ -279,7 +283,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                 .append(";")
                                 .append(500 + i)
                                 .append(";17:31:")
-                                .append(String.format("%02d", i))
+                                .append("%02d".formatted(i))
                                 .append(".00;0;")
                                 .append(2.0 + i)
                                 .append(";")
@@ -343,7 +347,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                 .append(";")
                                 .append(500 + i)
                                 .append(";17:31:")
-                                .append(String.format("%02d", i))
+                                .append("%02d".formatted(i))
                                 .append(".00;0;")
                                 .append(2.0 + i)
                                 .append(";")
@@ -412,7 +416,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                 .append(";")
                                 .append(500 + i)
                                 .append(";17:31:")
-                                .append(String.format("%02d", i))
+                                .append("%02d".formatted(i))
                                 .append(".00;0;")
                                 .append(2.0 + i)
                                 .append(";")
@@ -503,7 +507,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                 .append(";")
                                 .append(500 + i)
                                 .append(";17:31:")
-                                .append(String.format("%02d", i))
+                                .append("%02d".formatted(i))
                                 .append(".00;0;")
                                 .append(2.0 + i)
                                 .append(";")

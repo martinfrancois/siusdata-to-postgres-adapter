@@ -29,7 +29,7 @@ public class TestContainerPostgresDelegate extends AbstractDatabaseDelegate<Conn
             connectionProps.put("user", "test");
             connectionProps.put("password", "test");
             return DriverManager.getConnection(
-                    String.format("jdbc:postgresql://localhost:%s/test", container.getFirstMappedPort()),
+                    "jdbc:postgresql://localhost:%s/test".formatted(container.getFirstMappedPort()),
                     connectionProps);
         } catch (Exception e) {
             log.error("Could not obtain PostgresSQL connection");
