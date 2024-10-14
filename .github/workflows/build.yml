@@ -52,7 +52,7 @@ jobs:
           name: Release ${{ steps.date.outputs.date }}
           files: |
             build/libs/siusdata-to-postgres-adapter*.jar
-            build/native/nativeCompile/*
+            build/native/nativeCompile/siusdata-to-postgres-adapter*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
