@@ -13,115 +13,74 @@ The **SiusData to PostgreSQL Adapter** is a simple tool that automatically trans
 
 ## Requirements
 
-To use this tool on **Windows**, you need:
+To use this tool, you will need:
 
-- **Java**: Version 21 or higher installed on your computer.
+- **Java**: Version 21 or higher, if using the JAR file version of the application.
 - **PostgreSQL Database**: Access to a PostgreSQL database version 15 or higher where the data will be stored.
 - **SIUSData Setup with Dongle attached to SIUS scoring system**: The system that generates the CSV files with shooting data.
 - **Pushbullet Account** (optional): If you want to receive error notifications on your phone or computer.
 
+## Which Version Should You Use?
+
+There are two ways to run the SiusData to PostgreSQL Adapter:
+
+### 1. **JAR File Version (Cross-Platform)**
+
+The JAR file version works on any operating system that has Java 21 or higher installed. This is the most flexible option and works well if you already have Java installed or are comfortable installing it.
+
+- **Advantages**:
+    - Works on multiple platforms (Windows, macOS, Linux).
+    - Easier to update as new versions of Java come out.
+
+- **Disadvantages**:
+    - Requires Java to be installed and set up.
+    - May be slower to start compared to the native executable.
+
+### 2. **Native Executable for Windows**
+
+The native executable is optimized for Windows and doesn’t require Java to be installed separately. This option is ideal if you don’t want to manage Java installations or prefer a faster startup time.
+
+- **Advantages**:
+    - No need to install Java separately.
+    - Starts faster than the JAR version.
+
+- **Disadvantages**:
+    - Only works on Windows.
+    - May require additional DLLs to run, which are included in the zip download.
+
 ## How to Set It Up
 
-### Step 1: Download the Application
+### Option 1: Using the JAR File Version
 
-1. **Obtain the Adapter**: Download the latest version of the **SiusData to PostgreSQL Adapter**. (TODO add link)
+#### Step 1: Download the Application
 
-### Step 2: Install Java (if not already installed)
+1. **Obtain the JAR File**: Download the latest version of the [**siusdata-to-postgres-adapter.jar**](https://github.com/martinfrancois/siusdata-to-postgres-adapter/releases/latest).
+
+#### Step 2: Install Java (if not already installed)
 
 1. **Check if Java is Installed**:
     - Press `Win + R`, type `cmd`, and press Enter to open Command Prompt.
     - Type `java -version` and press Enter.
     - If Java is installed, it will display the version number.
-2. **Install Java** (if not installed):
-    - Download Java from [the official website](https://www.java.com/en/download/).
+    - **Important**: The version number must be **21** or higher. If it shows a lower version, you need to install or update Java to the correct version.
+
+2. **Install or Update Java** (if not installed or version is lower than 21):
+    - Download Java 21 or higher from [the official website](https://www.oracle.com/java/technologies/downloads/).
     - Run the installer and follow the on-screen instructions.
 
-### Step 3: Install PostgreSQL (if not already installed)
+#### Step 3: Install PostgreSQL (if not already installed)
 
-1. **Download PostgreSQL**:
-    - Visit [the official PostgreSQL website](https://www.postgresql.org/download/windows/) and download the installer.
-2. **Install PostgreSQL**:
-    - Run the installer and follow the on-screen instructions.
-    - During installation, note down:
-        - **Database Username** (default is `postgres`)
-        - **Database Password** (you will set this during installation)
-        - **Port Number** (default is `5432`)
+Follow the instructions under **"Install PostgreSQL"** further down in this README.
 
-### Step 4: Create a Database in PostgreSQL
+#### Step 4: Prepare the CSV Folder
 
-1. **Open pgAdmin**:
-    - Find pgAdmin in your Start Menu and open it.
-2. **Create a New Database**:
-    - Right-click on "Databases" in the left panel.
-    - Select "Create" > "Database...".
-    - Enter a name for your database (e.g., `siusdata`).
-    - Click "Save".
+Follow the instructions under **"Prepare the CSV Folder"** further down in this README.
 
-### Step 5: Prepare the CSV Folder
+#### Step 5: Configure the Application
 
-1. **Choose a Folder**:
-    - Decide on a folder where your SIUS system will save CSV files.
-    - Example: `C:\SiusData`.
-2. **Configure SIUS System**:
-    - Set up SIUSData to export CSV files to this folder.
+Follow the instructions under **"Configure the Application"** further down in this README to set up environment variables.
 
-### Step 6: Configure the Application
-
-You need to tell the application where to find the CSV files and how to connect to your database. This is done by setting environment variables.
-
-#### Setting Environment Variables on Windows
-
-1. **Open System Properties**:
-    - Press `Win + R`, type `sysdm.cpl`, and press Enter.
-2. **Access Environment Variables**:
-    - In the System Properties window, click on the **"Advanced"** tab.
-    - Click on the **"Environment Variables..."** button at the bottom.
-3. **Set Environment Variables**:
-    - In the **"Environment Variables"** window, under **"System variables"**, click **"New..."** to create a new variable.
-    - **Add the following variables one by one**:
-
-      **Variable 1:**
-
-        - **Variable name**: `CSV_MONITOR_PATH`
-        - **Variable value**: `C:\path\to\your\csv\folder`
-            - Replace `C:\path\to\your\csv\folder` with the actual path where your SIUS system saves CSV files.
-
-      **Variable 2:**
-
-        - **Variable name**: `POSTGRESQL_URL`
-        - **Variable value**: `postgresql://localhost:5432/your_database_name`
-            - Replace `your_database_name` with the name of the database you created (e.g., `siusdata`).
-
-      **Variable 3:**
-
-        - **Variable name**: `POSTGRESQL_USER`
-        - **Variable value**: `your_database_username`
-            - Replace `your_database_username` with your PostgreSQL username (default is `postgres`).
-
-      **Variable 4:**
-
-        - **Variable name**: `POSTGRESQL_PASSWORD`
-        - **Variable value**: `your_database_password`
-            - Replace `your_database_password` with your PostgreSQL password.
-
-      **Variable 5 (Optional for Notifications):**
-
-        - **Variable name**: `PUSHBULLET_API_KEY`
-        - **Variable value**: `your_pushbullet_api_key`
-            - Replace `your_pushbullet_api_key` with your Pushbullet Access Token.
-
-    - After adding each variable, click **"OK"** to save it.
-
-4. **Apply Changes**:
-    - Click **"OK"** to close the Environment Variables window.
-    - Click **"OK"** again to close the System Properties window.
-
-**Notes:**
-
-- Setting environment variables this way ensures they persist even after you restart your computer.
-- Be careful when editing system environment variables. Only change or add the variables specified.
-
-### Step 7: Run the Application
+#### Step 6: Run the Application
 
 1. **Open Command Prompt**:
     - Press `Win + R`, type `cmd`, and press Enter.
@@ -140,15 +99,50 @@ You need to tell the application where to find the CSV files and how to connect 
       java -jar siusdata-to-postgres-adapter.jar
       ```
 
-        - Replace `siusdata-to-postgres-adapter.jar` with the actual filename if it's different.
+    - Replace `siusdata-to-postgres-adapter.jar` with the actual filename if it's different.
 
-4. **Keep the Application Running**:
-    - Leave the Command Prompt window open.
-    - You can minimize it, but do not close it, as the application needs to keep running to monitor the folder.
+---
 
-### Optional: Automate Application Start and Restart on Failure
+### Option 2: Using the Native Windows Executable
+
+#### Step 1: Download the Native Executable
+
+1. **Obtain the Native Executable**: Download the latest version of the [**siusdata-to-postgres-adapter-native-executable.zip**](https://github.com/martinfrancois/siusdata-to-postgres-adapter/releases/latest).
+ 
+2. **Extract the Files**:
+   - Extract the contents of the ZIP file to a folder of your choice.
+   - This ZIP includes the `.exe` file and required `.dll` files.
+
+#### Step 2: Install PostgreSQL (if not already installed)
+
+Follow the instructions under **"Install PostgreSQL"** further down in this README.
+
+#### Step 3: Prepare the CSV Folder
+
+Follow the instructions under **"Prepare the CSV Folder"** further down in this README.
+
+#### Step 4: Configure the Application
+
+Follow the instructions under **"Configure the Application"** further down in this README to set up environment variables.
+
+#### Step 5: Run the Application
+
+1. **Open the Folder**:
+   - Navigate to the folder where you extracted the ZIP file.
+
+2. **Run the Executable**:
+   - Double-click the `siusdata-to-postgres-adapter.exe` file to start the application.
+   - A command-line window will appear, showing the application running.
+
+---
+
+## Automate Application Start and Restart on Failure
 
 To ensure the application starts automatically when you turn on your computer and restarts if it stops or crashes, you can set it up using **Windows Task Scheduler**.
+
+The instructions for setting this up differ slightly for the **JAR file version** and the **native executable version**:
+
+### For the JAR File Version
 
 #### Step 1: Create a Batch File to Run the Application
 
@@ -163,8 +157,8 @@ To ensure the application starts automatically when you turn on your computer an
       java -jar siusdata-to-postgres-adapter.jar
       ```
 
-        - Replace `C:\path\to\application\folder` with the actual path to your application.
-        - Ensure the JAR filename matches your application's filename.
+      - Replace `C:\path\to\application\folder` with the actual path to your application.
+      - Ensure the JAR filename matches your application's filename.
 3. **Save the Batch File**:
     - Click **"File"** > **"Save As..."**.
     - In the **"Save as type"** dropdown, select **"All Files (*.*)"**.
@@ -204,7 +198,9 @@ To ensure the application starts automatically when you turn on your computer an
     - Uncheck **"Start the task only if the computer is on AC power"** (if applicable).
 7. **Settings Tab**:
     - Check **"Allow task to be run on demand"**.
-    - Check **"If the task fails, restart every:"** and set it to `1 minute`.
+    -
+
+ Check **"If the task fails, restart every:"** and set it to `1 minute`.
     - Set **"Attempt to restart up to:"** `5` times.
     - Check **"If the task is already running, then the following rule applies:"** and select **"Stop the existing instance"**.
     - Click **"OK"**.
@@ -222,38 +218,114 @@ To ensure the application starts automatically when you turn on your computer an
     - Look for the Java process or your application in the list of running processes.
     - Check your PostgreSQL database or logs to confirm the application is functioning.
 
-#### Step 4: Ensure the Application Restarts on Failure
+---
 
-With the settings configured in the **Settings** tab, Windows Task Scheduler will attempt to restart the application if it stops unexpectedly.
+### For the Native Executable Version
 
-- **Restart on Failure**:
-    - The task is set to restart every `1` minute if it fails.
-    - It will attempt to restart up to `5` times.
-- **Continuous Monitoring**:
-    - The trigger set to **"At startup"** with a repeat interval ensures the task checks every minute to see if it needs to start or restart the application.
+#### Step 1: Create a Batch File to Run the Native Executable
 
-**Note**: The batch file runs the application and keeps it running as long as the Java process is active. If the application crashes, the scheduled task settings ensure it is restarted.
+1. **Open Notepad**:
+    - Press `Win + R`, type `notepad`, and press Enter.
+2. **Write the Batch Script**:
+    - In Notepad, type the following lines:
 
-## How It Works
+      ```cmd
+      @echo off
+      cd C:\path\to\native-executable\folder
+      siusdata-to-postgres-adapter.exe
+      ```
 
-- **Monitoring**: The application watches the folder you specified for new or updated CSV files.
-- **Processing**: When a CSV file is added or changed, it reads the new data.
-- **Storing Data**: The data is inserted into your PostgreSQL database in structured tables.
-- **Notifications**: If there's an error, and you've set up Pushbullet, you'll receive a notification.
+      - Replace `C:\path\to\native-executable\folder` with the actual path to your application.
+3. **Save the Batch File**:
+    - Click **"File"** > **"Save As..."**.
+    - In the **"Save as type"** dropdown, select **"All Files (*.*)"**.
+    - Enter the filename as `start-siusdata-adapter-native.bat`.
+    - Choose a location to save the batch file (e.g., `C:\path\to\batch\start-siusdata-adapter-native.bat`).
+    - Click **"Save"**.
 
-## Viewing Your Data
+#### Step 2: Create a Scheduled Task
 
-- **Using pgAdmin or Other Tools**:
-    - Open pgAdmin or any PostgreSQL client.
-    - Connect to your database using the credentials you set up.
-    - The data is stored in tables named `siusdata_shots` and `file_progress`.
-- **Analyzing Data**:
-    - You can run queries, generate reports, or use other software to analyze your shooting data.
+Follow the exact same steps as in the JAR file version, except when selecting the batch file, point it to the batch file you just created for the native executable (`start-siusdata-adapter-native.bat`).
+
+---
+
+## Install PostgreSQL (if not already installed)
+
+1. **Download PostgreSQL**:
+    - Visit [the official PostgreSQL website](https://www.postgresql.org/download/windows/) and download the installer.
+2. **Install PostgreSQL**:
+    - Run the installer and follow the on-screen instructions.
+    - During installation, note down:
+        - **Database Username** (default is `postgres`)
+        - **Database Password** (you will set this during installation)
+        - **Port Number** (default is `5432`)
+
+## Prepare the CSV Folder
+
+1. **Choose a Folder**:
+    - Decide on a folder where your SIUS system will save CSV files.
+    - Example: `C:\SiusData`.
+2. **Configure SIUS System**:
+    - Set up SIUSData to export CSV files to this folder.
+
+## Configure the Application
+
+You need to tell the application where to find the CSV files and how to connect to your database. This is done by setting environment variables.
+
+#### Setting Environment Variables on Windows
+
+1. **Open System Properties**:
+    - Press `Win + R`, type `sysdm.cpl`, and press Enter.
+2. **Access Environment Variables**:
+    - In the System Properties window, click on the **"Advanced"** tab.
+    - Click on the **"Environment Variables..."** button at the bottom.
+3. **Set Environment Variables**:
+    - In the **"Environment Variables"** window, under **"System variables"**, click **"New..."** to create a new variable.
+    - **Add the following variables one by one**:
+
+      **Variable 1**:  
+      - **Variable name**: `CSV_MONITOR_PATH`  
+      - **Variable value**: `C:\path\to\your\csv\folder`
+        - Replace `C:\path\to\your\csv\folder` with the actual path where your SIUS system saves CSV files.
+
+      **Variable 2**:  
+      - **Variable name**: `POSTGRESQL_URL`  
+      - **Variable value**: `postgresql://localhost:5432/your_database_name`
+        - Replace `your_database_name` with the name of the database you created (e.g., `siusdata`).
+
+      **Variable 3**:  
+      - **Variable name**: `POSTGRESQL_USER`  
+      - **Variable value**: `your_database_username`
+        - Replace `your_database_username` with your PostgreSQL username (default is `postgres`).
+
+      **Variable 4**:  
+      - **Variable name**: `POSTGRESQL_PASSWORD`  
+      - **Variable value**: `your_database_password`
+        - Replace `your_database_password` with your PostgreSQL password.
+
+      **Variable 5 (Optional for Notifications)**:  
+      - **Variable name**: `PUSHBULLET_API_KEY`  
+      - **Variable value**: `your_pushbullet_api_key`
+        - Replace `your_pushbullet_api_key` with your Pushbullet Access Token.
+
+    - After adding each variable, click **"OK"** to save it.
+
+4. **Apply Changes**:
+    - Click **"OK"** to close the Environment Variables window.
+    - Click **"OK"** again to close the System Properties window.
+
+**Notes**:
+
+- Setting environment variables this way ensures they persist even after you restart your computer.
+- Be careful when editing system environment variables. Only change or add the variables specified.
+
+---
 
 ## Troubleshooting
 
 - **The Application Doesn't Start**:
-    - Ensure Java is installed correctly.
+    - Ensure Java is installed correctly (if using the JAR version).
+    - **Check Java Version**: Use `java -version` in Command Prompt to confirm that the version is **21** or higher.
     - Check that you're using the correct path to the application file.
 - **No Data in the Database**:
     - Verify that the SIUS system is saving CSV files in the correct folder.
@@ -269,6 +341,8 @@ With the settings configured in the **Settings** tab, Windows Task Scheduler wil
     - Ensure the task is set to run with highest privileges.
     - Verify that the task is configured to run whether the user is logged on or not.
 
+---
+
 ## Optional: Setting Up Pushbullet Notifications
 
 If you want to receive error notifications:
@@ -282,7 +356,7 @@ If you want to receive error notifications:
     - Find **"Access Tokens"** and click **"Create Access Token"**.
     - Copy the generated token.
 3. **Set the API Key Environment Variable**:
-    - Follow the steps in **Setting Environment Variables on Windows** to add:
+    - Follow the steps in **"Configure the Application"** to add:
 
         - **Variable name**: `PUSHBULLET_API_KEY`
         - **Variable value**: Your Pushbullet Access Token
