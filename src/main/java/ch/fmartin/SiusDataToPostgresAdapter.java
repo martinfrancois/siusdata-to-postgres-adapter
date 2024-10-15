@@ -34,6 +34,7 @@ import java.util.regex.Pattern;
  */
 public class SiusDataToPostgresAdapter {
 
+    private static final int DELAY = 5000;
     // Configuration properties from environment variables
     private final String directoryToWatch;
     private String jdbcUrl;
@@ -224,12 +225,11 @@ public class SiusDataToPostgresAdapter {
         config.setPassword(jdbcPassword);
         config.setMaximumPoolSize(2);
         config.setMinimumIdle(1);
-        config.setIdleTimeout(300_000); // 5 minutes
-        config.setMaxLifetime(600_000); // 10 minutes
+        config.setIdleTimeout(120_000); // 2 minutes
+        config.setMaxLifetime(300_000); // 5 minutes
         config.setConnectionTimeout(30_000); // 30 seconds
         config.setValidationTimeout(5_000); // 5 seconds
-        config.setConnectionTestQuery("SELECT 1");
-        config.setKeepaliveTime(300_000); // 5 minutes
+        config.setKeepaliveTime(180_000); // 3 minutes
         config.setPoolName("SiusDataHikariCP");
 
         HikariDataSource ds = new HikariDataSource(config);
@@ -282,6 +282,9 @@ public class SiusDataToPostgresAdapter {
 
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
+            if (!conn.isValid(5)) {
+                throw new SQLException("Obtained an invalid connection from the pool.");
+            }
 
             stmt.executeUpdate(createSiusdataShotsTable);
             logger.info("'siusdata_shots' table created or exists already.");
@@ -467,6 +470,7 @@ public class SiusDataToPostgresAdapter {
      */
     void processFileWithRetries(Path filePath) {
         String fileName = filePath.getFileName().toString();
+
         while (true) {
             try {
                 setProcessing(true);
@@ -474,12 +478,14 @@ public class SiusDataToPostgresAdapter {
                 setProcessing(false);
                 queuedFiles.remove(fileName);
                 logger.info("Successfully processed file: {}", fileName);
+
                 break; // Exit loop on success
             } catch (Exception e) {
                 logError("Failed to process file " + fileName + ": " + e.getMessage(), e);
+
                 try {
-                    logger.info("Waiting for 5000 milliseconds before retrying...");
-                    Thread.sleep(5_000); // Fixed 5-second wait
+                    logger.info("Waiting for {} milliseconds before retrying...", DELAY);
+                    Thread.sleep(DELAY);
                 } catch (InterruptedException ie) {
                     logger.warn("Retry sleep interrupted.");
                     Thread.currentThread().interrupt();
@@ -502,6 +508,9 @@ public class SiusDataToPostgresAdapter {
         boolean keepProcessing = true;
         while (keepProcessing) {
             try (Connection conn = dataSource.getConnection()) {
+                if (!conn.isValid(5)) {
+                    throw new SQLException("Obtained an invalid connection from the pool.");
+                }
 
                 // Disable auto-commit for transaction management
                 conn.setAutoCommit(false);
@@ -527,6 +536,7 @@ public class SiusDataToPostgresAdapter {
                             processedCount++;
                         } catch (SQLException e) {
                             logError("Failed to insert record at line " + (lastProcessedLine + processedCount + 1) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                            throw e; // rethrow to trigger retry
                         }
                     }
 
@@ -946,7 +956,7 @@ public class SiusDataToPostgresAdapter {
         return initialized;
     }
 
-    public void setInitialized(boolean initialized) {
+    private void setInitialized(boolean initialized) {
         this.initialized = initialized;
     }
 
@@ -954,7 +964,7 @@ public class SiusDataToPostgresAdapter {
         return watching;
     }
 
-    public void setWatching(boolean watching) {
+    private void setWatching(boolean watching) {
         this.watching = watching;
     }
 
@@ -962,7 +972,7 @@ public class SiusDataToPostgresAdapter {
         return processing;
     }
 
-    public void setProcessing(boolean processing) {
+    private void setProcessing(boolean processing) {
         this.processing = processing;
     }
 }

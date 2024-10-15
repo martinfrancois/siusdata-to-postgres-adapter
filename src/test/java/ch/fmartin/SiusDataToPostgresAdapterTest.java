@@ -42,7 +42,7 @@ public class SiusDataToPostgresAdapterTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        adapter = new SiusDataToPostgresAdapter(
+        adapter = spy(new SiusDataToPostgresAdapter(
                 logger,
                 executorService,
                 dataSource,
@@ -52,7 +52,9 @@ public class SiusDataToPostgresAdapterTest {
                 "user",
                 "password",
                 "pushbulletApiKey"
-        );
+        ));
+        // ensure we don't call the real pushbullet endpoint
+        lenient().doNothing().when(adapter).sendPushbulletNotification(anyString(), anyString());
     }
 
     @Test
@@ -173,6 +175,7 @@ public class SiusDataToPostgresAdapterTest {
         Statement stmt = mock(Statement.class);
         when(dataSource.getConnection()).thenReturn(conn);
         when(conn.createStatement()).thenReturn(stmt);
+        when(conn.isValid(anyInt())).thenReturn(true);
 
         // when
         adapter.initializeDatabaseSchema();
@@ -554,29 +557,23 @@ public class SiusDataToPostgresAdapterTest {
     void testLogError_WithThrowable() {
         // given
         Throwable throwable = new RuntimeException("Test exception");
-        SiusDataToPostgresAdapter spyAdapter = spy(adapter);
-        doNothing().when(spyAdapter).sendPushbulletNotification(anyString(), anyString());
 
         // when
-        spyAdapter.logError("Error message", throwable);
+        adapter.logError("Error message", throwable);
 
         // then
         verify(logger).error("Error message", throwable);
-        verify(spyAdapter).sendPushbulletNotification(anyString(), anyString());
+        verify(adapter).sendPushbulletNotification(anyString(), anyString());
     }
 
     @Test
     void testLogError_WithoutThrowable() {
-        // given
-        SiusDataToPostgresAdapter spyAdapter = spy(adapter);
-        doNothing().when(spyAdapter).sendPushbulletNotification(anyString(), anyString());
-
         // when
-        spyAdapter.logError("Error message");
+        adapter.logError("Error message");
 
         // then
         verify(logger).error("Error message");
-        verify(spyAdapter).sendPushbulletNotification(anyString(), anyString());
+        verify(adapter).sendPushbulletNotification(anyString(), anyString());
     }
 
     @Test
@@ -586,16 +583,15 @@ public class SiusDataToPostgresAdapterTest {
         Path csvFile = tempDir.resolve("20210000.csv");
         Files.createFile(csvFile);
 
-        SiusDataToPostgresAdapter spyAdapter = spy(adapter);
-        doNothing().when(spyAdapter).submitFileForProcessing(any(Path.class), eq(true));
+        doNothing().when(adapter).submitFileForProcessing(any(Path.class), eq(true));
 
         // when
-        spyAdapter.processExistingFiles(tempDir);
+        adapter.processExistingFiles(tempDir);
 
         // then
         verify(logger).info("Scanning directory for existing CSV files to process...");
         verify(logger).info("Found existing file to process: {}", "20210000.csv");
-        verify(spyAdapter).submitFileForProcessing(csvFile, true);
+        verify(adapter).submitFileForProcessing(csvFile, true);
 
         // Clean up
         Files.delete(csvFile);
@@ -606,20 +602,19 @@ public class SiusDataToPostgresAdapterTest {
     void testProcessFileWithRetries_FailureThenSuccess() throws Exception {
         // given
         Path filePath = Path.of("testfile.csv");
-        SiusDataToPostgresAdapter spyAdapter = spy(adapter);
 
         IOException exception = new IOException("Test exception");
         doThrow(exception)
                 .doNothing()
-                .when(spyAdapter).processFile(filePath);
+                .when(adapter).processFile(filePath);
 
         // when
-        spyAdapter.processFileWithRetries(filePath);
+        adapter.processFileWithRetries(filePath);
 
         // then
-        verify(spyAdapter, times(2)).processFile(filePath);
+        verify(adapter, times(2)).processFile(filePath);
         verify(logger).error("Failed to process file testfile.csv: Test exception", exception);
-        verify(logger).info("Waiting for 5000 milliseconds before retrying...");
+        verify(logger).info("Waiting for {} milliseconds before retrying...", 5000);
         verify(logger).info("Successfully processed file: {}", "testfile.csv");
     }
 
