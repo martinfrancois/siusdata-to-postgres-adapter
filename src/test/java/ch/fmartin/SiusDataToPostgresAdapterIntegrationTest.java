@@ -1,11 +1,16 @@
 package ch.fmartin;
 
 import com.github.stefanbirkner.systemlambda.SystemLambda;
+import eu.rekawek.toxiproxy.Proxy;
+import eu.rekawek.toxiproxy.ToxiproxyClient;
+import eu.rekawek.toxiproxy.model.ToxicDirection;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.ToxiproxyContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
@@ -27,16 +32,34 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     private Path tempDir;
     private SiusDataToPostgresAdapter adapter;
     private Thread adapterThread;
+    private Network network;
+    private ToxiproxyContainer toxiproxy;
+    private Proxy proxy;
+    private ToxiproxyClient toxiproxyClient;
 
     @BeforeEach
     public void setUp() throws Exception {
+        network = Network.newNetwork();
+
         postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
                 .withDatabaseName("test")
                 .withUsername("test")
                 .withPassword("test")
+                .withNetwork(network)
+                .withNetworkAliases("postgres")
+                .withExposedPorts(5432)
                 .waitingFor(new TestContainerPostgresWaitStrategy());
 
         postgreSQLContainer.start();
+
+        // Initialize Toxiproxy container and proxy for PostgreSQL
+        toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.10.0")
+                .withNetwork(network);
+        toxiproxy.start();
+
+        toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
+        proxy = toxiproxyClient.createProxy("postgres", "0.0.0.0:8666", "postgres:5432");
+
         // Create a temporary directory to act as the CSV directory to watch
         tempDir = Files.createTempDirectory("siusdata_test");
     }
@@ -59,6 +82,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .forEach(File::delete);
 
         postgreSQLContainer.stop();
+        toxiproxy.stop();
     }
 
     @Test
@@ -67,6 +91,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     String csvData = """
@@ -116,6 +141,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     adapterThread = new Thread(() -> {
@@ -170,6 +196,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     String csvData = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
@@ -224,6 +251,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     String csvData1 = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;1;3;2373669100;0;0;0;64;0\n";
@@ -274,6 +302,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
@@ -338,6 +367,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
@@ -407,6 +437,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
@@ -480,6 +511,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
                 .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
                 .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
                 .execute(() -> {
                     // given
                     adapterThread = new Thread(() -> {
@@ -548,6 +580,168 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                     rs.next();
                                     int count = rs.getInt(1);
                                     assertEquals(30200, count, "There should be 30200 records in siusdata_shots table");
+                                }
+                            });
+                });
+    }
+
+    @Test
+    public void testDatabaseConnectionInterruptedDuringProcessing() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test")
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    // given
+                    StringBuilder csvDataBuilder = new StringBuilder();
+                    for (int i = 1; i <= 30000; i++) {
+                        csvDataBuilder.append("244062;10;0;3;10.")
+                                .append(i % 10)
+                                .append(";")
+                                .append(500 + i)
+                                .append(";17:31:")
+                                .append("%02d".formatted(i))
+                                .append(".00;0;")
+                                .append(2.0 + i)
+                                .append(";")
+                                .append(4.0 + i)
+                                .append(";1;655.35;0;0;152;0;0;0;0;0;")
+                                .append(i)
+                                .append(";3;2373669")
+                                .append(100 + i)
+                                .append(";0;0;0;64;0\n");
+                    }
+
+                    String csvData = csvDataBuilder.toString();
+                    String csvFileName = "20231018_large_test.csv";
+                    Path csvFilePath = tempDir.resolve(csvFileName);
+
+                    Files.write(csvFilePath, csvData.getBytes());
+
+                    // Start the adapter in a separate thread
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    // Wait until the adapter starts processing
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isProcessing());
+
+                    // Simulate the DB being unreachable on the internet by cutting off the connection using Toxiproxy
+                    proxy.toxics().bandwidth("CUT_CONNECTION_DOWNSTREAM", ToxicDirection.DOWNSTREAM, 0);
+                    proxy.toxics().bandwidth("CUT_CONNECTION_UPSTREAM", ToxicDirection.UPSTREAM, 0);
+
+                    // Wait for a while to ensure the adapter detects the DB disconnection
+                    Thread.sleep(10000);
+
+                    // Restore the DB connection using Toxiproxy
+                    proxy.toxics().get("CUT_CONNECTION_DOWNSTREAM").remove();
+                    proxy.toxics().get("CUT_CONNECTION_UPSTREAM").remove();
+
+                    // Wait for the adapter to reconnect and resume processing
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(2, TimeUnit.SECONDS)
+                            .untilAsserted(() -> {
+                                try (Connection conn = DriverManager.getConnection(
+                                        "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test",
+                                        postgreSQLContainer.getUsername(),
+                                        postgreSQLContainer.getPassword())) {
+                                    Statement stmt = conn.createStatement();
+                                    ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                                    rs.next();
+                                    int count = rs.getInt(1);
+                                    assertEquals(30000, count, "There should be 30000 records in siusdata_shots table");
+                                }
+                            });
+                });
+    }
+
+    @Test
+    public void testDatabaseConnectionRefusedDuringProcessing() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test")
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    // given
+                    StringBuilder csvDataBuilder = new StringBuilder();
+                    for (int i = 1; i <= 30000; i++) {
+                        csvDataBuilder.append("244062;10;0;3;10.")
+                                .append(i % 10)
+                                .append(";")
+                                .append(500 + i)
+                                .append(";17:31:")
+                                .append("%02d".formatted(i))
+                                .append(".00;0;")
+                                .append(2.0 + i)
+                                .append(";")
+                                .append(4.0 + i)
+                                .append(";1;655.35;0;0;152;0;0;0;0;0;")
+                                .append(i)
+                                .append(";3;2373669")
+                                .append(100 + i)
+                                .append(";0;0;0;64;0\n");
+                    }
+
+                    String csvData = csvDataBuilder.toString();
+                    String csvFileName = "20231018_large_test.csv";
+                    Path csvFilePath = tempDir.resolve(csvFileName);
+
+                    Files.write(csvFilePath, csvData.getBytes());
+
+                    // Start the adapter in a separate thread
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    // Wait until the adapter starts processing
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isProcessing());
+
+                    // Simulate the DB returning "connection refused" using Toxiproxy
+                    proxy.disable();
+
+                    // Wait for a while to ensure the adapter detects the DB disconnection
+                    Thread.sleep(10000);
+
+                    // Restore the DB connection using Toxiproxy
+                    proxy.enable();
+
+                    // Wait for the adapter to reconnect and resume processing
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(2, TimeUnit.SECONDS)
+                            .untilAsserted(() -> {
+                                try (Connection conn = DriverManager.getConnection(
+                                        "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test",
+                                        postgreSQLContainer.getUsername(),
+                                        postgreSQLContainer.getPassword())) {
+                                    Statement stmt = conn.createStatement();
+                                    ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                                    rs.next();
+                                    int count = rs.getInt(1);
+                                    assertEquals(30000, count, "There should be 30000 records in siusdata_shots table");
                                 }
                             });
                 });
