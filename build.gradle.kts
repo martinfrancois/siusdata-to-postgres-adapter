@@ -62,6 +62,7 @@ tasks.test {
 graalvmNative {
     binaries.all {
         resources.autodetect()
+        buildArgs.add("--enable-url-protocols=https") // Enable HTTPS protocol
     }
     metadataRepository {
         enabled.set(true)
