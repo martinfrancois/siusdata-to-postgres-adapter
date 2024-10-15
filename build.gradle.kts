@@ -62,6 +62,9 @@ graalvmNative {
     binaries.all {
         resources.autodetect()
     }
+    metadataRepository {
+        enabled.set(true)
+    }
 }
 
 tasks.shadowJar {
