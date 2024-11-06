@@ -23,7 +23,7 @@ dependencies {
 
     // DB connection
     implementation("org.postgresql:postgresql:42.7.4")  // PostgreSQL JDBC Driver
-    implementation("com.zaxxer:HikariCP:6.0.0")
+    implementation("com.zaxxer:HikariCP:6.1.0")
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.16")
