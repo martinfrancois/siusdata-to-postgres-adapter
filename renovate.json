@@ -3,22 +3,26 @@
   "extends": [
     "config:recommended"
   ],
-  "reviewers": ["martinfrancois"],
+  "reviewers": [
+    "martinfrancois"
+  ],
   "rangeStrategy": "replace",
   "separateMinorPatch": true,
   "packageRules": [
     {
-      "matchUpdateTypes": ["patch"],
+      "matchUpdateTypes": [
+        "patch"
+      ],
       "automerge": true
     },
     {
       "groupName": "Testing",
-      "matchPackagePrefixes": [
-        "org.mockito",
-        "org.junit",
-        "org.testcontainers",
-        "com.github.stefanbirkner",
-        "org.awaitility"
+      "matchPackageNames": [
+        "org.mockito{/,}**",
+        "org.junit{/,}**",
+        "org.testcontainers{/,}**",
+        "com.github.stefanbirkner{/,}**",
+        "org.awaitility{/,}**"
       ]
     }
   ]
