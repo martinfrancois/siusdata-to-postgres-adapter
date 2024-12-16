@@ -36,7 +36,7 @@ dependencies {
     implementation("org.json:json:20240303")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.11.3"))
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.mockito:mockito-junit-jupiter:5.14.2")
     testImplementation("org.testcontainers:testcontainers:1.20.4")
