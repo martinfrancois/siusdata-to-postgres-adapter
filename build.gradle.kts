@@ -47,7 +47,7 @@ dependencies {
     testImplementation("org.awaitility:awaitility:4.2.2")
 
     // OpenRewrite
-    rewrite("org.openrewrite.recipe:rewrite-migrate-java:2.31.1")
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.0.0")
 }
 
 tasks.test {
