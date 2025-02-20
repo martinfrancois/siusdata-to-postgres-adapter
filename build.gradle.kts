@@ -41,8 +41,8 @@ dependencies {
     testImplementation("org.mockito:mockito-junit-jupiter:5.15.2")
     testImplementation("org.testcontainers:testcontainers:1.20.4")
     testImplementation("org.testcontainers:junit-jupiter:1.20.4")
-    testImplementation("org.testcontainers:postgresql:1.20.4")
-    testImplementation("org.testcontainers:toxiproxy:1.20.4")
+    testImplementation("org.testcontainers:postgresql:1.20.5")
+    testImplementation("org.testcontainers:toxiproxy:1.20.5")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.2.2")
 
