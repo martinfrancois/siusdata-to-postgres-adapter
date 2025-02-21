@@ -36,7 +36,7 @@ dependencies {
     implementation("org.json:json:20250107")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:5.12.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.mockito:mockito-junit-jupiter:5.15.2")
     testImplementation("org.testcontainers:testcontainers:1.20.4")
@@ -44,7 +44,7 @@ dependencies {
     testImplementation("org.testcontainers:postgresql:1.20.5")
     testImplementation("org.testcontainers:toxiproxy:1.20.5")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
-    testImplementation("org.awaitility:awaitility:4.2.2")
+    testImplementation("org.awaitility:awaitility:4.3.0")
 
     // OpenRewrite
     rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.2.0")
