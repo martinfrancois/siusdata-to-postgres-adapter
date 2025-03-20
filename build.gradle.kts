@@ -19,7 +19,7 @@ repositories {
 
 dependencies {
     // Utilities
-    implementation("com.google.guava:guava:33.4.0-jre")
+    implementation("com.google.guava:guava:33.4.5-jre")
 
     // DB connection
     implementation("org.postgresql:postgresql:42.7.5")  // PostgreSQL JDBC Driver
