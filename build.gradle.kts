@@ -33,7 +33,7 @@ dependencies {
     implementation("de.siegmar:fastcsv:3.4.0")
 
     // JSON Handling
-    implementation("org.json:json:20250107")
+    implementation("org.json:json:20250517")
 
     // Testing
     testImplementation(platform("org.junit:junit-bom:5.12.2"))
