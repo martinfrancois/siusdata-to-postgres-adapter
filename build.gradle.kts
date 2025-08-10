@@ -30,7 +30,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.18")
 
     // CSV Parsing
-    implementation("de.siegmar:fastcsv:3.4.0")
+    implementation("de.siegmar:fastcsv:3.7.0")
 
     // JSON Handling
     implementation("org.json:json:20250107")
