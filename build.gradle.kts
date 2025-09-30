@@ -36,13 +36,13 @@ dependencies {
     implementation("org.json:json:20250517")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.12.2"))
+    testImplementation(platform("org.junit:junit-bom:5.14.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.mockito:mockito-junit-jupiter:5.15.2")
-    testImplementation("org.testcontainers:testcontainers:1.20.6")
-    testImplementation("org.testcontainers:junit-jupiter:1.20.6")
-    testImplementation("org.testcontainers:postgresql:1.20.6")
-    testImplementation("org.testcontainers:toxiproxy:1.20.6")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.20.0")
+    testImplementation("org.testcontainers:testcontainers:1.21.3")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.3")
+    testImplementation("org.testcontainers:postgresql:1.21.3")
+    testImplementation("org.testcontainers:toxiproxy:1.21.3")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
 
