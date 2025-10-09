@@ -11,11 +11,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.sql.*;
 import java.time.Instant;
@@ -41,6 +43,11 @@ public class SiusDataToPostgresAdapter {
     private final String jdbcUser;
     private final String jdbcPassword;
     private final String pushbulletApiKey;
+    private final String gotifyUrl;
+    private final String gotifyToken;
+    private final int gotifyPriority;
+
+    private static final int DEFAULT_GOTIFY_PRIORITY = 5;
 
     // Dependencies
     private final Logger logger;
@@ -80,6 +87,19 @@ public class SiusDataToPostgresAdapter {
         this.jdbcUser = System.getenv("POSTGRESQL_USER");
         this.jdbcPassword = System.getenv("POSTGRESQL_PASSWORD");
         this.pushbulletApiKey = System.getenv("PUSHBULLET_API_KEY");
+        this.gotifyUrl = System.getenv("GOTIFY_URL");
+        this.gotifyToken = System.getenv("GOTIFY_TOKEN");
+
+        int resolvedPriority = DEFAULT_GOTIFY_PRIORITY;
+        String gotifyPriorityEnv = System.getenv("GOTIFY_PRIORITY");
+        if (gotifyPriorityEnv != null && !gotifyPriorityEnv.isBlank()) {
+            try {
+                resolvedPriority = Integer.parseInt(gotifyPriorityEnv.trim());
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid GOTIFY_PRIORITY value '{}'. Using default {}.", gotifyPriorityEnv, DEFAULT_GOTIFY_PRIORITY);
+            }
+        }
+        this.gotifyPriority = resolvedPriority;
 
         validateEnvironmentVariables();
 
@@ -124,6 +144,21 @@ public class SiusDataToPostgresAdapter {
                                      String jdbcUser,
                                      String jdbcPassword,
                                      String pushbulletApiKey) {
+        this(logger, executorService, dataSource, watchService, directoryToWatch, jdbcUrl, jdbcUser, jdbcPassword, pushbulletApiKey, null, null, DEFAULT_GOTIFY_PRIORITY);
+    }
+
+    public SiusDataToPostgresAdapter(Logger logger,
+                                     ExecutorService executorService,
+                                     HikariDataSource dataSource,
+                                     WatchService watchService,
+                                     String directoryToWatch,
+                                     String jdbcUrl,
+                                     String jdbcUser,
+                                     String jdbcPassword,
+                                     String pushbulletApiKey,
+                                     String gotifyUrl,
+                                     String gotifyToken,
+                                     int gotifyPriority) {
         this.logger = logger;
         this.executorService = executorService;
         this.dataSource = dataSource;
@@ -133,6 +168,9 @@ public class SiusDataToPostgresAdapter {
         this.jdbcUser = jdbcUser;
         this.jdbcPassword = jdbcPassword;
         this.pushbulletApiKey = pushbulletApiKey;
+        this.gotifyUrl = gotifyUrl;
+        this.gotifyToken = gotifyToken;
+        this.gotifyPriority = gotifyPriority;
 
         // No environment variable validation in this constructor to allow flexibility in tests
     }
@@ -327,23 +365,26 @@ public class SiusDataToPostgresAdapter {
 
             // Using try-with-resources for OutputStream
             try (OutputStream os = conn.getOutputStream()) {
-                os.write(json.toString().getBytes("UTF-8"));
+                os.write(json.toString().getBytes(StandardCharsets.UTF_8));
             }
 
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
                 logger.error("Failed to send Pushbullet notification. Response Code: {}", responseCode);
 
-                // Using try-with-resources for BufferedReader to read the error response body
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {
-                    StringBuilder responseBody = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBody.append(line);
+                InputStream errorStream = conn.getErrorStream();
+                if (errorStream != null) {
+                    // Using try-with-resources for BufferedReader to read the error response body
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(errorStream, StandardCharsets.UTF_8))) {
+                        StringBuilder responseBody = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            responseBody.append(line);
+                        }
+                        logger.error("Response body: {}", responseBody.toString());
+                    } catch (IOException e) {
+                        logger.error("Error reading response body: {}", e.getMessage(), e);
                     }
-                    logger.error("Response body: {}", responseBody.toString());
-                } catch (IOException e) {
-                    logger.error("Error reading response body: {}", e.getMessage(), e);
                 }
             } else {
                 logger.debug("Pushbullet notification sent successfully.");
@@ -356,6 +397,70 @@ public class SiusDataToPostgresAdapter {
                 conn.disconnect();
             }
         }
+    }
+
+    void sendGotifyNotification(String title, String message) {
+        if (gotifyUrl == null || gotifyUrl.isBlank()) {
+            logger.debug("Gotify URL not set. Skipping notification.");
+            return;
+        }
+        if (gotifyToken == null || gotifyToken.isBlank()) {
+            logger.debug("Gotify token not set. Skipping notification.");
+            return;
+        }
+
+        HttpURLConnection conn = null;
+        try {
+            String endpoint = gotifyUrl.endsWith("/") ? gotifyUrl + "message" : gotifyUrl + "/message";
+            URL url = URI.create(endpoint).toURL();
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("X-Gotify-Key", gotifyToken);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+
+            JSONObject json = new JSONObject();
+            json.put("title", title);
+            json.put("message", message);
+            json.put("priority", gotifyPriority);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(json.toString().getBytes(StandardCharsets.UTF_8));
+            }
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                logger.error("Failed to send Gotify notification. Response Code: {}", responseCode);
+
+                InputStream errorStream = conn.getErrorStream();
+                if (errorStream != null) {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(errorStream, StandardCharsets.UTF_8))) {
+                        StringBuilder responseBody = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            responseBody.append(line);
+                        }
+                        logger.error("Response body: {}", responseBody.toString());
+                    } catch (IOException e) {
+                        logger.error("Error reading Gotify response body: {}", e.getMessage(), e);
+                    }
+                }
+            } else {
+                logger.debug("Gotify notification sent successfully.");
+            }
+
+        } catch (IOException e) {
+            logger.error("Error sending Gotify notification: {}", e.getMessage(), e);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    void sendNotifications(String title, String message) {
+        sendPushbulletNotification(title, message);
+        sendGotifyNotification(title, message);
     }
 
     /**
@@ -936,7 +1041,7 @@ public class SiusDataToPostgresAdapter {
     void logError(String message, Throwable throwable) {
         if (throwable != null) {
             logger.error(message, throwable);
-            sendPushbulletNotification("SiusData Adapter Error", message + "\n" + Throwables.getStackTraceAsString(throwable));
+            sendNotifications("SiusData Adapter Error", message + "\n" + Throwables.getStackTraceAsString(throwable));
         } else {
             logError(message); // Delegate to the overloaded method
         }
@@ -949,7 +1054,7 @@ public class SiusDataToPostgresAdapter {
      */
     void logError(String message) {
         logger.error(message);
-        sendPushbulletNotification("SiusData Adapter Error", message);
+        sendNotifications("SiusData Adapter Error", message);
     }
 
     public boolean isInitialized() {
