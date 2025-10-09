@@ -19,6 +19,7 @@ To use this tool, you will need:
 - **PostgreSQL Database**: Access to a PostgreSQL database version 15 or higher where the data will be stored.
 - **SIUSData Setup with Dongle attached to SIUS scoring system**: The system that generates the CSV files with shooting data.
 - **Pushbullet Account** (optional): If you want to receive error notifications on your phone or computer.
+- **Gotify Server and App Token** (optional): If you prefer to receive notifications through your Gotify instance.
 
 ## Which Version Should You Use?
 
@@ -303,10 +304,25 @@ You need to tell the application where to find the CSV files and how to connect 
       - **Variable value**: `your_database_password`
         - Replace `your_database_password` with your PostgreSQL password.
 
-      **Variable 5 (Optional for Notifications)**:  
-      - **Variable name**: `PUSHBULLET_API_KEY`  
+      **Variable 5 (Optional for Notifications)**:
+      - **Variable name**: `PUSHBULLET_API_KEY`
       - **Variable value**: `your_pushbullet_api_key`
         - Replace `your_pushbullet_api_key` with your Pushbullet Access Token.
+
+      **Variable 6 (Optional for Gotify Notifications)**:
+      - **Variable name**: `GOTIFY_URL`
+      - **Variable value**: `https://your-gotify.example.com`
+        - Replace `https://your-gotify.example.com` with the base URL of your Gotify instance.
+
+      **Variable 7 (Optional for Gotify Notifications)**:
+      - **Variable name**: `GOTIFY_TOKEN`
+      - **Variable value**: `your_gotify_app_token`
+        - Replace `your_gotify_app_token` with the token generated for your Gotify app.
+
+      **Variable 8 (Optional Priority Override)**:
+      - **Variable name**: `GOTIFY_PRIORITY`
+      - **Variable value**: `5`
+        - Replace `5` with the priority level you want Gotify to use (defaults to `5` if not set or invalid).
 
     - After adding each variable, click **"OK"** to save it.
 
@@ -336,6 +352,10 @@ You need to tell the application where to find the CSV files and how to connect 
 - **Pushbullet Notifications Not Working**:
     - Ensure your `PUSHBULLET_API_KEY` is correct.
     - Check your Pushbullet account for any issues.
+- **Gotify Notifications Not Working**:
+    - Verify that `GOTIFY_URL` points to your Gotify server (including `https://` or `http://`).
+    - Ensure the `GOTIFY_TOKEN` matches an active Gotify application token.
+    - Optional: Adjust `GOTIFY_PRIORITY` to a supported value on your server.
 - **Scheduled Task Issues**:
     - Check Task Scheduler for any errors or history of the task.
     - Ensure the task is set to run with highest privileges.
@@ -360,6 +380,28 @@ If you want to receive error notifications:
 
         - **Variable name**: `PUSHBULLET_API_KEY`
         - **Variable value**: Your Pushbullet Access Token
+
+## Optional: Setting Up Gotify Notifications
+
+If you run a Gotify server, you can receive the same error alerts there:
+
+1. **Sign In to Gotify**:
+    - Open your Gotify server in a browser and log in as an administrator or user.
+2. **Create an Application Token**:
+    - Go to the **"Applications"** tab.
+    - Click **"Create Application"**, provide a descriptive name, and Gotify will generate a token.
+    - Copy the generated token for later use.
+3. **Configure Environment Variables**:
+    - Add the following variables using the steps from **"Configure the Application"**:
+
+        - **Variable name**: `GOTIFY_URL`
+        - **Variable value**: The base URL of your Gotify server (for example, `https://gotify.example.com`).
+
+        - **Variable name**: `GOTIFY_TOKEN`
+        - **Variable value**: The application token you generated.
+
+        - **Variable name** (optional): `GOTIFY_PRIORITY`
+        - **Variable value**: Priority level for Gotify (defaults to `5` if omitted or invalid).
 
 ## Tips
 

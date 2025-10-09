@@ -222,6 +222,66 @@ public class SiusDataToPostgresAdapterTest {
         verify(logger).debug("Pushbullet API key not set. Skipping notification.");
     }
 
+    @Test
+    void testSendGotifyNotification_UrlNotSet() {
+        // given
+        SiusDataToPostgresAdapter gotifyAdapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "test_directory",
+                "jdbc:postgresql://localhost/testdb",
+                "user",
+                "password",
+                "pushbulletApiKey"
+        );
+
+        // when
+        gotifyAdapter.sendGotifyNotification("title", "message");
+
+        // then
+        verify(logger).debug("Gotify URL not set. Skipping notification.");
+    }
+
+    @Test
+    void testSendGotifyNotification_TokenNotSet() {
+        // given
+        SiusDataToPostgresAdapter gotifyAdapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "test_directory",
+                "jdbc:postgresql://localhost/testdb",
+                "user",
+                "password",
+                null,
+                "https://gotify.example.com",
+                null,
+                5
+        );
+
+        // when
+        gotifyAdapter.sendGotifyNotification("title", "message");
+
+        // then
+        verify(logger).debug("Gotify token not set. Skipping notification.");
+    }
+
+    @Test
+    void testSendNotifications() {
+        // given
+        doNothing().when(adapter).sendGotifyNotification(anyString(), anyString());
+
+        // when
+        adapter.sendNotifications("title", "message");
+
+        // then
+        verify(adapter).sendPushbulletNotification("title", "message");
+        verify(adapter).sendGotifyNotification("title", "message");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"12345678.csv", "87654321_data.csv", "12345678.CSV"})
     void testIsValidCsvFile_Valid(String fileName) {
@@ -564,6 +624,7 @@ public class SiusDataToPostgresAdapterTest {
         // then
         verify(logger).error("Error message", throwable);
         verify(adapter).sendPushbulletNotification(anyString(), anyString());
+        verify(adapter).sendGotifyNotification(anyString(), anyString());
     }
 
     @Test
@@ -574,6 +635,7 @@ public class SiusDataToPostgresAdapterTest {
         // then
         verify(logger).error("Error message");
         verify(adapter).sendPushbulletNotification(anyString(), anyString());
+        verify(adapter).sendGotifyNotification(anyString(), anyString());
     }
 
     @Test
