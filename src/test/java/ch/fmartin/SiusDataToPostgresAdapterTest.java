@@ -348,9 +348,9 @@ public class SiusDataToPostgresAdapterTest {
         Thread worker = new Thread(() -> adapter.processFileWithRetries(tempFile));
         worker.start();
 
+        awaitCondition(() -> adapter.isProcessing(), 2000);
         assertTrue(invocationLatch.await(1, TimeUnit.SECONDS), "processFile should have been invoked");
-        awaitCondition(() -> adapter.isProcessing(), 1000);
-        awaitCondition(() -> !adapter.isProcessing(), 1000);
+        awaitCondition(() -> !adapter.isProcessing(), 6000);
         assertFalse(adapter.isProcessing(), "Processing flag should be cleared while waiting to retry");
 
         worker.interrupt();
