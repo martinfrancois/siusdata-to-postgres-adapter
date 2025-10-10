@@ -235,21 +235,21 @@ public class SiusDataToPostgresAdapter {
      * Exits the application if any required variable is missing.
      */
     void validateEnvironmentVariables() {
-        if (directoryToWatch == null) {
-            logger.error("Environment variable CSV_MONITOR_PATH is not set.");
-            throw new IllegalStateException("Environment variable CSV_MONITOR_PATH is not set.");
+        if (directoryToWatch == null || directoryToWatch.isBlank()) {
+            logger.error("Environment variable CSV_MONITOR_PATH is not set or blank.");
+            throw new IllegalStateException("Environment variable CSV_MONITOR_PATH is not set or blank.");
         }
-        if (jdbcUrl == null) {
-            logger.error("Environment variable POSTGRESQL_URL is not set.");
-            throw new IllegalStateException("Environment variable POSTGRESQL_URL is not set.");
+        if (jdbcUrl == null || jdbcUrl.isBlank()) {
+            logger.error("Environment variable POSTGRESQL_URL is not set or blank.");
+            throw new IllegalStateException("Environment variable POSTGRESQL_URL is not set or blank.");
         }
-        if (jdbcUser == null) {
-            logger.error("Environment variable POSTGRESQL_USER is not set.");
-            throw new IllegalStateException("Environment variable POSTGRESQL_USER is not set.");
+        if (jdbcUser == null || jdbcUser.isBlank()) {
+            logger.error("Environment variable POSTGRESQL_USER is not set or blank.");
+            throw new IllegalStateException("Environment variable POSTGRESQL_USER is not set or blank.");
         }
-        if (jdbcPassword == null) {
-            logger.error("Environment variable POSTGRESQL_PASSWORD is not set.");
-            throw new IllegalStateException("Environment variable POSTGRESQL_PASSWORD is not set.");
+        if (jdbcPassword == null || jdbcPassword.isBlank()) {
+            logger.error("Environment variable POSTGRESQL_PASSWORD is not set or blank.");
+            throw new IllegalStateException("Environment variable POSTGRESQL_PASSWORD is not set or blank.");
         }
         logger.info("All required environment variables are set.");
     }
