@@ -20,11 +20,14 @@ import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.Comparator;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SiusDataToPostgresAdapterIntegrationTest {
 
@@ -83,6 +86,95 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
         postgreSQLContainer.stop();
         toxiproxy.stop();
+    }
+
+    @Test
+    public void testIgnoresSidecarFilesInReproductionFolder() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", Path.of("src/test/resources/reproduction").toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isInitialized());
+
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery("SELECT file_name FROM file_progress ORDER BY file_name");
+                        int count = 0;
+                        boolean saw20250928 = false;
+                        boolean saw20250930 = false;
+                        while (rs.next()) {
+                            String name = rs.getString(1);
+                            count++;
+                            assertFalse(name.endsWith("_stl.csv"), "Should not track _stl.csv files");
+                            assertFalse(name.endsWith("_mod.csv"), "Should not track _mod.csv files");
+                            if ("20250928.csv".equals(name)) {
+                                saw20250928 = true;
+                            }
+                            if ("20250930.csv".equals(name)) {
+                                saw20250930 = true;
+                            }
+                        }
+                        assertTrue(saw20250928, "Should have processed 20250928.csv");
+                        assertTrue(saw20250930, "Should have processed 20250930.csv");
+                        assertEquals(2, count, "Only two main CSV files should be tracked");
+                    }
+                });
+    }
+
+    @Test
+    public void testShutdownInterruptsRetryLoop() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    // Create an invalid CSV to force processing exceptions and retries
+                    String badLine = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276\n"; // too few columns
+                    Path badFile = tempDir.resolve("20260101.csv");
+                    Files.write(badFile, badLine.getBytes());
+
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    // Wait until it starts processing
+                    Awaitility.await()
+                            .atMost(30, TimeUnit.SECONDS)
+                            .pollInterval(500, TimeUnit.MILLISECONDS)
+                            .until(() -> adapter != null && adapter.isProcessing());
+
+                    // Trigger shutdown and ensure thread terminates promptly (should break out of retry sleep)
+                    adapter.shutdown();
+                    adapterThread.join(10000);
+                    assertFalse(adapterThread.isAlive(), "Adapter thread should terminate promptly after shutdown");
+                });
     }
 
     @Test
@@ -742,6 +834,194 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                                     rs.next();
                                     int count = rs.getInt(1);
                                     assertEquals(30000, count, "There should be 30000 records in siusdata_shots table");
+                                }
+                            });
+                });
+    }
+
+    private void startAdapterAndProcess(Path csvFilePath) throws Exception {
+        adapterThread = new Thread(() -> {
+            try {
+                adapter = new SiusDataToPostgresAdapter();
+                adapter.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+        adapterThread.setDaemon(true);
+        adapterThread.start();
+
+        Awaitility.await()
+                .atMost(1, TimeUnit.MINUTES)
+                .pollInterval(1, TimeUnit.SECONDS)
+                .until(() -> adapter != null && adapter.isWatching());
+
+        Awaitility.await()
+                .atMost(2, TimeUnit.MINUTES)
+                .pollInterval(1, TimeUnit.SECONDS)
+                .until(() -> {
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        try (PreparedStatement ps = conn.prepareStatement("SELECT last_processed_line FROM file_progress WHERE file_name = ?")) {
+                            ps.setString(1, csvFilePath.getFileName().toString());
+                            try (ResultSet rs = ps.executeQuery()) {
+                                if (rs.next()) {
+                                    int last = rs.getInt(1);
+                                    return last > 0; // processed at least one line
+                                }
+                            }
+                        }
+                        return false;
+                    }
+                });
+    }
+
+    @Test
+    public void testEmptyIntegerFields() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .execute(() -> {
+                    // Write a CSV file with empty integer fields
+                    String csvData = "244062;10;;3;;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
+                    Path csvFilePath = tempDir.resolve("20250101_test_empty_integers.csv");
+                    Files.write(csvFilePath, csvData.getBytes());
+
+                    startAdapterAndProcess(csvFilePath);
+
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                        rs.next();
+                        int count = rs.getInt(1);
+                        assertEquals(1, count, "There should be 1 record with empty integer fields handled.");
+                    }
+                });
+    }
+
+    @Test
+    public void testNonIntegerInIntegerField() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .execute(() -> {
+                    // Write a CSV file with non-integer in integer fields
+                    String csvData = "244062;Shooter 678267;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
+                    Path csvFilePath = tempDir.resolve("20250101_test_non_integer.csv");
+                    Files.write(csvFilePath, csvData.getBytes());
+
+                    startAdapterAndProcess(csvFilePath);
+
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                        rs.next();
+                        int count = rs.getInt(1);
+                        assertEquals(1, count, "There should be 1 record with non-integer values handled.");
+                    }
+                });
+    }
+
+    @Test
+    public void testFewerColumns() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .execute(() -> {
+                    // Write a CSV file with fewer than 27 columns
+                    String csvData = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152\n";
+                    Path csvFilePath = tempDir.resolve("20250101_test_fewer_columns.csv");
+                    Files.write(csvFilePath, csvData.getBytes());
+
+                    // Start the adapter (do not wait for processed rows, as this file is invalid)
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    // Ensure the adapter is watching; avoid waiting for inserts that will never happen
+                    Awaitility.await()
+                            .atMost(30, TimeUnit.SECONDS)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isWatching());
+
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                        rs.next();
+                        int count = rs.getInt(1);
+                        assertEquals(0, count, "No records should be inserted due to missing columns.");
+                    }
+                });
+    }
+
+    @Test
+    public void testPartialLineCompletion() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .execute(() -> {
+                    // Write a partial line to the CSV file
+                    String partialLine = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0";
+                    String remainingLine = ";0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
+                    Path csvFilePath = tempDir.resolve("20250101_test_partial_line.csv");
+                    Files.write(csvFilePath, partialLine.getBytes());
+
+                    // Start the adapter in a separate thread
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isWatching() && adapter.isProcessing());
+
+                    Thread.sleep(2000);
+
+                    Files.write(csvFilePath, remainingLine.getBytes(), StandardOpenOption.APPEND);
+
+                    Awaitility.await()
+                            .atMost(2, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .untilAsserted(() -> {
+                                try (Connection conn = DriverManager.getConnection(
+                                        postgreSQLContainer.getJdbcUrl(),
+                                        postgreSQLContainer.getUsername(),
+                                        postgreSQLContainer.getPassword())) {
+                                    Statement stmt = conn.createStatement();
+                                    ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots");
+                                    rs.next();
+                                    int count = rs.getInt(1);
+                                    assertEquals(1, count, "There should be 1 record after the line is completed.");
                                 }
                             });
                 });

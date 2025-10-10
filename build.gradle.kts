@@ -3,10 +3,16 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
-    id("org.openrewrite.rewrite") version "7.17.0"
+    id("org.openrewrite.rewrite") version "7.18.0"
     id("com.gradleup.shadow") version "9.2.2"
     id("org.graalvm.buildtools.native") version "0.10.6"
     id("application")
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
 }
 
 application {
@@ -19,15 +25,15 @@ repositories {
 
 dependencies {
     // Utilities
-    implementation("com.google.guava:guava:33.4.8-jre")
+    implementation("com.google.guava:guava:33.5.0-jre")
 
     // DB connection
-    implementation("org.postgresql:postgresql:42.7.7")  // PostgreSQL JDBC Driver
+    implementation("org.postgresql:postgresql:42.7.8")  // PostgreSQL JDBC Driver
     implementation("com.zaxxer:HikariCP:7.0.2")
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.17")
-    implementation("ch.qos.logback:logback-classic:1.5.18")
+    implementation("ch.qos.logback:logback-classic:1.5.19")
 
     // CSV Parsing
     implementation("de.siegmar:fastcsv:4.1.0")
@@ -36,7 +42,7 @@ dependencies {
     implementation("org.json:json:20250517")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:5.14.0"))
+    testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.mockito:mockito-junit-jupiter:5.20.0")
     testImplementation("org.testcontainers:testcontainers:1.21.3")
@@ -47,7 +53,7 @@ dependencies {
     testImplementation("org.awaitility:awaitility:4.3.0")
 
     // OpenRewrite
-    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.18.0")
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.19.0")
 }
 
 tasks.test {
