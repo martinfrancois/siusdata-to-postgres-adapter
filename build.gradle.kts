@@ -5,7 +5,7 @@ plugins {
     id("java")
     id("org.openrewrite.rewrite") version "7.18.0"
     id("com.gradleup.shadow") version "9.2.2"
-    id("org.graalvm.buildtools.native") version "0.10.6"
+    id("org.graalvm.buildtools.native") version "0.11.1"
     id("application")
 }
 
@@ -51,6 +51,7 @@ dependencies {
     testImplementation("org.testcontainers:toxiproxy:1.21.3")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
     rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.19.0")
