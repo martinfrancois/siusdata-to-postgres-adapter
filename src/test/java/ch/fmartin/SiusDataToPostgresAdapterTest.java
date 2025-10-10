@@ -95,8 +95,8 @@ public class SiusDataToPostgresAdapterTest {
         Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
 
         // then
-        assertEquals("Environment variable CSV_MONITOR_PATH is not set.", exception.getMessage());
-        verify(logger).error("Environment variable CSV_MONITOR_PATH is not set.");
+        assertEquals("Environment variable CSV_MONITOR_PATH is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable CSV_MONITOR_PATH is not set or blank.");
     }
 
     @Test
@@ -118,8 +118,8 @@ public class SiusDataToPostgresAdapterTest {
         Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
 
         // then
-        assertEquals("Environment variable POSTGRESQL_URL is not set.", exception.getMessage());
-        verify(logger).error("Environment variable POSTGRESQL_URL is not set.");
+        assertEquals("Environment variable POSTGRESQL_URL is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_URL is not set or blank.");
     }
 
     @Test
@@ -141,8 +141,8 @@ public class SiusDataToPostgresAdapterTest {
         Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
 
         // then
-        assertEquals("Environment variable POSTGRESQL_USER is not set.", exception.getMessage());
-        verify(logger).error("Environment variable POSTGRESQL_USER is not set.");
+        assertEquals("Environment variable POSTGRESQL_USER is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_USER is not set or blank.");
     }
 
     @Test
@@ -164,8 +164,101 @@ public class SiusDataToPostgresAdapterTest {
         Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
 
         // then
-        assertEquals("Environment variable POSTGRESQL_PASSWORD is not set.", exception.getMessage());
-        verify(logger).error("Environment variable POSTGRESQL_PASSWORD is not set.");
+        assertEquals("Environment variable POSTGRESQL_PASSWORD is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_PASSWORD is not set or blank.");
+
+    }
+
+    @Test
+    void testValidateEnvironmentVariables_BlankDirectory() throws Exception {
+        // given
+        adapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "   ",  // directoryToWatch is blank
+                "jdbc:postgresql://localhost/testdb",
+                "user",
+                "password",
+                "pushbulletApiKey"
+        );
+
+        // when
+        Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
+
+        // then
+        assertEquals("Environment variable CSV_MONITOR_PATH is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable CSV_MONITOR_PATH is not set or blank.");
+    }
+
+    @Test
+    void testValidateEnvironmentVariables_BlankJdbcUrl() throws Exception {
+        // given
+        adapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "directoryToWatch",
+                "  ",  // jdbcUrl is blank
+                "jdbcUser",
+                "jdbcPassword",
+                "pushbulletApiKey"
+        );
+
+        // when
+        Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
+
+        // then
+        assertEquals("Environment variable POSTGRESQL_URL is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_URL is not set or blank.");
+    }
+
+    @Test
+    void testValidateEnvironmentVariables_BlankJdbcUser() throws Exception {
+        // given
+        adapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "directoryToWatch",
+                "jdbc:postgresql://localhost/testdb",
+                "  ",  // jdbcUser is blank
+                "jdbcPassword",
+                "pushbulletApiKey"
+        );
+
+        // when
+        Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
+
+        // then
+        assertEquals("Environment variable POSTGRESQL_USER is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_USER is not set or blank.");
+    }
+
+    @Test
+    void testValidateEnvironmentVariables_BlankJdbcPassword() throws Exception {
+        // given
+        adapter = new SiusDataToPostgresAdapter(
+                logger,
+                executorService,
+                dataSource,
+                watchService,
+                "directoryToWatch",
+                "jdbc:postgresql://localhost/testdb",
+                "jdbcUser",
+                "   ",  // jdbcPassword is blank
+                "pushbulletApiKey"
+        );
+
+        // when
+        Exception exception = assertThrows(IllegalStateException.class, adapter::validateEnvironmentVariables);
+
+        // then
+        assertEquals("Environment variable POSTGRESQL_PASSWORD is not set or blank.", exception.getMessage());
+        verify(logger).error("Environment variable POSTGRESQL_PASSWORD is not set or blank.");
     }
 
     @Test
