@@ -26,6 +26,8 @@ import java.util.Comparator;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SiusDataToPostgresAdapterIntegrationTest {
 
@@ -84,6 +86,95 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
         postgreSQLContainer.stop();
         toxiproxy.stop();
+    }
+
+    @Test
+    public void testIgnoresSidecarFilesInReproductionFolder() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", Path.of("src/test/resources/reproduction").toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(1, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isInitialized());
+
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery("SELECT file_name FROM file_progress ORDER BY file_name");
+                        int count = 0;
+                        boolean saw20250928 = false;
+                        boolean saw20250930 = false;
+                        while (rs.next()) {
+                            String name = rs.getString(1);
+                            count++;
+                            assertFalse(name.endsWith("_stl.csv"), "Should not track _stl.csv files");
+                            assertFalse(name.endsWith("_mod.csv"), "Should not track _mod.csv files");
+                            if ("20250928.csv".equals(name)) {
+                                saw20250928 = true;
+                            }
+                            if ("20250930.csv".equals(name)) {
+                                saw20250930 = true;
+                            }
+                        }
+                        assertTrue(saw20250928, "Should have processed 20250928.csv");
+                        assertTrue(saw20250930, "Should have processed 20250930.csv");
+                        assertEquals(2, count, "Only two main CSV files should be tracked");
+                    }
+                });
+    }
+
+    @Test
+    public void testShutdownInterruptsRetryLoop() throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    // Create an invalid CSV to force processing exceptions and retries
+                    String badLine = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276\n"; // too few columns
+                    Path badFile = tempDir.resolve("20260101.csv");
+                    Files.write(badFile, badLine.getBytes());
+
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    // Wait until it starts processing
+                    Awaitility.await()
+                            .atMost(30, TimeUnit.SECONDS)
+                            .pollInterval(500, TimeUnit.MILLISECONDS)
+                            .until(() -> adapter != null && adapter.isProcessing());
+
+                    // Trigger shutdown and ensure thread terminates promptly (should break out of retry sleep)
+                    adapter.shutdown();
+                    adapterThread.join(10000);
+                    assertFalse(adapterThread.isAlive(), "Adapter thread should terminate promptly after shutdown");
+                });
     }
 
     @Test
