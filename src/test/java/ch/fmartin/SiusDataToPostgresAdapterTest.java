@@ -639,6 +639,24 @@ public class SiusDataToPostgresAdapterTest {
     }
 
     @Test
+    void testWatchDirectoryStopsUpdatesFlag() throws InterruptedException {
+        // given
+        doThrow(new InterruptedException("Test interruption")).when(watchService).take();
+
+        // when
+        adapter.watchDirectory();
+
+        // then
+        assertFalse(adapter.isWatching());
+        verify(logger).info("Starting directory watch loop.");
+        verify(logger).warn("Watch service interrupted.");
+        verify(logger).info("Directory watch loop stopped.");
+
+        // clear interrupted state for subsequent tests
+        Thread.interrupted();
+    }
+
+    @Test
     void testProcessExistingFiles() throws IOException {
         // given
         Path tempDir = Files.createTempDirectory("testDir");

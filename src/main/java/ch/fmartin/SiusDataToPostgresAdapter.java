@@ -473,50 +473,55 @@ public class SiusDataToPostgresAdapter {
     void watchDirectory() {
         logger.info("Starting directory watch loop.");
         setWatching(true);
-        while (true) {
-            WatchKey key;
-            try {
-                key = watchService.take();  // Wait for a watch key to be available
-            } catch (InterruptedException e) {
-                logger.warn("Watch service interrupted.");
-                Thread.currentThread().interrupt();
-                break;
-            } catch (ClosedWatchServiceException e) {
-                logger.info("Watch service closed.");
-                break;
-            }
-
-            for (WatchEvent<?> event : key.pollEvents()) {
-                WatchEvent.Kind<?> kind = event.kind();
-
-                // Overflow event
-                if (kind == StandardWatchEventKinds.OVERFLOW) {
-                    logger.warn("File system event overflow occurred.");
-                    continue;
+        try {
+            while (true) {
+                WatchKey key;
+                try {
+                    key = watchService.take();  // Wait for a watch key to be available
+                } catch (InterruptedException e) {
+                    logger.warn("Watch service interrupted.");
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (ClosedWatchServiceException e) {
+                    logger.info("Watch service closed.");
+                    break;
                 }
 
-                // Context for directory entry event is the file name of entry
-                WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                String fileName = ev.context().toString();
-                Path filePath = Path.of(directoryToWatch).resolve(fileName);
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    WatchEvent.Kind<?> kind = event.kind();
 
-                // Check if the file matches the CSV pattern
-                if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
-                    if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                        logger.info("Detected {} event for file: {}", kind.name(), fileName);
-                        submitFileForProcessing(filePath, false);
+                    // Overflow event
+                    if (kind == StandardWatchEventKinds.OVERFLOW) {
+                        logger.warn("File system event overflow occurred.");
+                        continue;
                     }
-                } else {
-                    logger.debug("Skipping non-matching file or directory: {}", fileName);
+
+                    // Context for directory entry event is the file name of entry
+                    WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                    String fileName = ev.context().toString();
+                    Path filePath = Path.of(directoryToWatch).resolve(fileName);
+
+                    // Check if the file matches the CSV pattern
+                    if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
+                        if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                            logger.info("Detected {} event for file: {}", kind.name(), fileName);
+                            submitFileForProcessing(filePath, false);
+                        }
+                    } else {
+                        logger.debug("Skipping non-matching file or directory: {}", fileName);
+                    }
+                }
+
+                // Reset the key -- this step is critical to receive further watch events.
+                boolean valid = key.reset();
+                if (!valid) {
+                    logError("Watch key is no longer valid. Stopping watch service.", null);
+                    break;
                 }
             }
-
-            // Reset the key -- this step is critical to receive further watch events.
-            boolean valid = key.reset();
-            if (!valid) {
-                logError("Watch key is no longer valid. Stopping watch service.", null);
-                break;
-            }
+        } finally {
+            setWatching(false);
+            logger.info("Directory watch loop stopped.");
         }
     }
 
