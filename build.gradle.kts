@@ -9,6 +9,12 @@ plugins {
     id("application")
 }
 
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
+
 application {
     mainClass.set("ch.fmartin.SiusDataToPostgresAdapter")
 }
