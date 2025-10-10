@@ -63,35 +63,6 @@ tasks.test {
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
         "--add-opens", "java.base/java.util=ALL-UNNAMED"
     )
-
-    // Ensure Testcontainers connects to the active Docker context even if
-    // ~/.testcontainers.properties specifies an outdated DOCKER_HOST.
-    doFirst {
-        val existing = System.getenv("DOCKER_HOST")
-        if (existing.isNullOrBlank()) {
-            try {
-                val ctxProc = ProcessBuilder("docker", "context", "show")
-                    .redirectErrorStream(true)
-                    .start()
-                val activeContext = ctxProc.inputStream.reader().readText().trim()
-                ctxProc.waitFor()
-
-                if (activeContext.isNotBlank()) {
-                    val hostProc = ProcessBuilder(
-                        "docker", "context", "inspect", "--format", "{{ .Endpoints.docker.Host }}", activeContext
-                    ).redirectErrorStream(true).start()
-                    val detectedHost = hostProc.inputStream.reader().readText().trim().trim('"')
-                    hostProc.waitFor()
-
-                    if (detectedHost.isNotBlank()) {
-                        environment("DOCKER_HOST", detectedHost)
-                    }
-                }
-            } catch (_: Exception) {
-                // If detection fails, fall back to environment/default behavior
-            }
-        }
-    }
 }
 
 graalvmNative {
