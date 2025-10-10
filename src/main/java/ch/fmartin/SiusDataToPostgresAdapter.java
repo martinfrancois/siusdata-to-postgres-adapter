@@ -70,6 +70,9 @@ public class SiusDataToPostgresAdapter {
     // is true when it is currently reading the csv and writing it to the db
     private boolean processing = false;
 
+    // indicates shutdown in progress; used to interrupt retry loops promptly
+    private volatile boolean shuttingDown = false;
+
     private final AtomicInteger existingFilesTaskCount = new AtomicInteger(0);
 
     /**
@@ -524,7 +527,15 @@ public class SiusDataToPostgresAdapter {
      * @return True if it matches, false otherwise.
      */
     boolean isValidCsvFile(String fileName) {
-        return CSV_FILE_PATTERN.matcher(fileName).matches();
+        if (!CSV_FILE_PATTERN.matcher(fileName).matches()) {
+            return false;
+        }
+        String lower = fileName.toLowerCase();
+        // Explicitly exclude SIUS sidecar files
+        if (lower.endsWith("_stl.csv") || lower.endsWith("_mod.csv")) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -577,6 +588,13 @@ public class SiusDataToPostgresAdapter {
         String fileName = filePath.getFileName().toString();
 
         while (true) {
+            // Exit promptly if shutdown has been initiated or thread interrupted
+            if (shuttingDown || Thread.currentThread().isInterrupted()) {
+                logger.info("Aborting processing of file {} due to shutdown.", fileName);
+                setProcessing(false);
+                queuedFiles.remove(fileName);
+                break;
+            }
             try {
                 setProcessing(true);
                 processFile(filePath);
@@ -589,11 +607,19 @@ public class SiusDataToPostgresAdapter {
                 logError("Failed to process file " + fileName + ": " + e.getMessage(), e);
 
                 try {
+                    if (shuttingDown || Thread.currentThread().isInterrupted()) {
+                        logger.info("Stopping retries for file {} due to shutdown.", fileName);
+                        setProcessing(false);
+                        queuedFiles.remove(fileName);
+                        break;
+                    }
                     logger.info("Waiting for {} milliseconds before retrying...", DELAY);
                     Thread.sleep(DELAY);
                 } catch (InterruptedException ie) {
                     logger.warn("Retry sleep interrupted.");
                     Thread.currentThread().interrupt();
+                    setProcessing(false);
+                    queuedFiles.remove(fileName);
                     break;
                 }
             }
@@ -997,6 +1023,8 @@ public class SiusDataToPostgresAdapter {
      */
     void shutdown() {
         logger.info("Shutting down application...");
+        // Mark shutdown to allow running tasks to terminate promptly
+        this.shuttingDown = true;
 
         // Close WatchService
         if (watchService != null) {
@@ -1010,9 +1038,11 @@ public class SiusDataToPostgresAdapter {
 
         // Shutdown ExecutorService
         if (executorService != null) {
-            executorService.shutdown();
+            // Interrupt running tasks immediately to stop retry sleeps
+            executorService.shutdownNow();
             try {
                 if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                    // Best-effort: force again
                     executorService.shutdownNow();
                 }
                 logger.info("Executor service shutdown complete.");
