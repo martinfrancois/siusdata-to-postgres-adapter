@@ -606,6 +606,9 @@ public class SiusDataToPostgresAdapter {
             } catch (Exception e) {
                 logError("Failed to process file " + fileName + ": " + e.getMessage(), e);
 
+                // Expose that processing is currently paused while waiting to retry
+                setProcessing(false);
+
                 try {
                     if (shuttingDown || Thread.currentThread().isInterrupted()) {
                         logger.info("Stopping retries for file {} due to shutdown.", fileName);

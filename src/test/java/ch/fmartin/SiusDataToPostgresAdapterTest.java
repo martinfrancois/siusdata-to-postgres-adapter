@@ -18,6 +18,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -332,6 +333,40 @@ public class SiusDataToPostgresAdapterTest {
         // then
         verify(logger).info("File {} is already queued or being processed. Skipping submission.", "testfile.csv");
         verifyNoInteractions(executorService);
+    }
+
+    @Test
+    void testProcessFileWithRetriesResetsProcessingFlagBetweenAttempts() throws Exception {
+        Path tempFile = Files.createTempFile("sius", ".csv");
+        CountDownLatch invocationLatch = new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+            invocationLatch.countDown();
+            throw new IOException("boom");
+        }).when(adapter).processFile(any(Path.class));
+
+        Thread worker = new Thread(() -> adapter.processFileWithRetries(tempFile));
+        worker.start();
+
+        assertTrue(invocationLatch.await(1, TimeUnit.SECONDS), "processFile should have been invoked");
+        awaitCondition(() -> adapter.isProcessing(), 1000);
+        awaitCondition(() -> !adapter.isProcessing(), 1000);
+        assertFalse(adapter.isProcessing(), "Processing flag should be cleared while waiting to retry");
+
+        worker.interrupt();
+        worker.join(2000);
+        Files.deleteIfExists(tempFile);
+    }
+
+    private void awaitCondition(Supplier<Boolean> condition, long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            if (Boolean.TRUE.equals(condition.get())) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        fail("Condition was not met within timeout");
     }
 
     @Test
