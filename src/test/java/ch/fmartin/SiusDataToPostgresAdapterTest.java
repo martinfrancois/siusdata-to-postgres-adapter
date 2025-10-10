@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -339,8 +340,10 @@ public class SiusDataToPostgresAdapterTest {
     void testProcessFileWithRetriesResetsProcessingFlagBetweenAttempts() throws Exception {
         Path tempFile = Files.createTempFile("sius", ".csv");
         CountDownLatch invocationLatch = new CountDownLatch(1);
+        AtomicBoolean processingFlagDuringInvocation = new AtomicBoolean(false);
 
         doAnswer(invocation -> {
+            processingFlagDuringInvocation.set(adapter.isProcessing());
             invocationLatch.countDown();
             throw new IOException("boom");
         }).when(adapter).processFile(any(Path.class));
@@ -348,8 +351,8 @@ public class SiusDataToPostgresAdapterTest {
         Thread worker = new Thread(() -> adapter.processFileWithRetries(tempFile));
         worker.start();
 
-        awaitCondition(() -> adapter.isProcessing(), 2000);
-        assertTrue(invocationLatch.await(1, TimeUnit.SECONDS), "processFile should have been invoked");
+        assertTrue(invocationLatch.await(2, TimeUnit.SECONDS), "processFile should have been invoked");
+        assertTrue(processingFlagDuringInvocation.get(), "Processing flag should be true while invoking processFile");
         awaitCondition(() -> !adapter.isProcessing(), 6000);
         assertFalse(adapter.isProcessing(), "Processing flag should be cleared while waiting to retry");
 
