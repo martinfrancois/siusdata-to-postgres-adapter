@@ -72,7 +72,8 @@ graalvmNative {
         buildArgs.add("--enable-url-protocols=https") // Enable HTTPS protocol
     }
     metadataRepository {
-        enabled.set(true)
+        // Disable remote metadata downloads to avoid TLS certificate trust issues in CI
+        enabled.set(false)
     }
 }
 
