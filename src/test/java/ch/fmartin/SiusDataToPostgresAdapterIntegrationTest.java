@@ -6,6 +6,7 @@ import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Network;
@@ -42,29 +43,34 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @BeforeEach
     public void setUp() throws Exception {
-        network = Network.newNetwork();
+        try {
+            network = Network.newNetwork();
 
-        postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
-                .withDatabaseName("test")
-                .withUsername("test")
-                .withPassword("test")
-                .withNetwork(network)
-                .withNetworkAliases("postgres")
-                .withExposedPorts(5432)
-                .waitingFor(new TestContainerPostgresWaitStrategy());
+            postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
+                    .withDatabaseName("test")
+                    .withUsername("test")
+                    .withPassword("test")
+                    .withNetwork(network)
+                    .withNetworkAliases("postgres")
+                    .withExposedPorts(5432)
+                    .waitingFor(new TestContainerPostgresWaitStrategy());
 
-        postgreSQLContainer.start();
+            postgreSQLContainer.start();
 
-        // Initialize Toxiproxy container and proxy for PostgreSQL
-        toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.10.0")
-                .withNetwork(network);
-        toxiproxy.start();
+            // Initialize Toxiproxy container and proxy for PostgreSQL
+            toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.10.0")
+                    .withNetwork(network);
+            toxiproxy.start();
 
-        toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
-        proxy = toxiproxyClient.createProxy("postgres", "0.0.0.0:8666", "postgres:5432");
+            toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
+            proxy = toxiproxyClient.createProxy("postgres", "0.0.0.0:8666", "postgres:5432");
 
-        // Create a temporary directory to act as the CSV directory to watch
-        tempDir = Files.createTempDirectory("siusdata_test");
+            // Create a temporary directory to act as the CSV directory to watch
+            tempDir = Files.createTempDirectory("siusdata_test");
+        } catch (IllegalStateException e) {
+            cleanUpContainers();
+            Assumptions.assumeTrue(false, "Docker environment required for integration tests: " + e.getMessage());
+        }
     }
 
     @AfterEach
@@ -79,13 +85,45 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         }
 
         // Delete temporary directory and files
-        Files.walk(tempDir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete);
+        if (tempDir != null) {
+            Files.walk(tempDir)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+            tempDir = null;
+        }
 
-        postgreSQLContainer.stop();
-        toxiproxy.stop();
+        cleanUpContainers();
+    }
+
+    private void cleanUpContainers() {
+        if (proxy != null) {
+            try {
+                proxy.delete();
+            } catch (Exception ignored) {
+                // Ignore failures during cleanup
+            }
+            proxy = null;
+        }
+
+        if (toxiproxy != null) {
+            if (toxiproxy.isRunning()) {
+                toxiproxy.stop();
+            }
+            toxiproxy = null;
+        }
+
+        if (postgreSQLContainer != null) {
+            if (postgreSQLContainer.isRunning()) {
+                postgreSQLContainer.stop();
+            }
+            postgreSQLContainer = null;
+        }
+
+        if (network != null) {
+            network.close();
+            network = null;
+        }
     }
 
     @Test
