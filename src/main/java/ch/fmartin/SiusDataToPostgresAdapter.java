@@ -264,14 +264,14 @@ public class SiusDataToPostgresAdapter {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(jdbcUser);
         config.setPassword(jdbcPassword);
+        
         config.setMaximumPoolSize(1);
-        config.setMinimumIdle(0);
-        config.setIdleTimeout(5 * 60_000L); // 5 minutes
-        config.setMaxLifetime(30 * 60_000L); // 30 minutes
-        config.setConnectionTimeout(30_000); // 30 seconds
-        config.setValidationTimeout(5_000); // 5 seconds
-        config.setKeepaliveTime(5 * 60_000L); // 5 minutes
-        config.setPoolName("SiusDataHikariCP");
+        config.setMinimumIdle(1);            // keep one warm connection
+        config.setIdleTimeout(0);            // don’t retire the only idle connection
+        config.setMaxLifetime(30 * 60_000L); // rotate before server/network does
+        config.setKeepaliveTime(5 * 60_000L);// keep NAT/state fresh
+        config.setConnectionTimeout(10_000); // fail fast, your retry loop handles it
+        config.setValidationTimeout(5_000);
 
         HikariDataSource ds = new HikariDataSource(config);
         logger.info("HikariCP DataSource initialized with pool name '{}', maximum pool size {}.", config.getPoolName(), config.getMaximumPoolSize());
