@@ -264,14 +264,14 @@ public class SiusDataToPostgresAdapter {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(jdbcUser);
         config.setPassword(jdbcPassword);
-        config.setMaximumPoolSize(2);
-        config.setMinimumIdle(1);
-        config.setIdleTimeout(120_000); // 2 minutes
-        config.setMaxLifetime(300_000); // 5 minutes
-        config.setConnectionTimeout(30_000); // 30 seconds
-        config.setValidationTimeout(5_000); // 5 seconds
-        config.setKeepaliveTime(180_000); // 3 minutes
-        config.setPoolName("SiusDataHikariCP");
+        
+        config.setMaximumPoolSize(1);
+        config.setMinimumIdle(1);            // keep one warm connection
+        config.setIdleTimeout(0);            // don’t retire the only idle connection
+        config.setMaxLifetime(30 * 60_000L); // rotate before server/network does
+        config.setKeepaliveTime(5 * 60_000L);// keep NAT/state fresh
+        config.setConnectionTimeout(10_000); // fail fast, your retry loop handles it
+        config.setValidationTimeout(5_000);
 
         HikariDataSource ds = new HikariDataSource(config);
         logger.info("HikariCP DataSource initialized with pool name '{}', maximum pool size {}.", config.getPoolName(), config.getMaximumPoolSize());
@@ -504,7 +504,7 @@ public class SiusDataToPostgresAdapter {
                     // Check if the file matches the CSV pattern
                     if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
                         if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                            logger.info("Detected {} event for file: {}", kind.name(), fileName);
+                            logger.debug("Detected {} event for file: {}", kind.name(), fileName);
                             submitFileForProcessing(filePath, false);
                         }
                     } else {
@@ -578,7 +578,7 @@ public class SiusDataToPostgresAdapter {
                 }
             });
         } else {
-            logger.info("File {} is already queued or being processed. Skipping submission.", fileName);
+            logger.debug("File {} is already queued or being processed. Skipping submission.", fileName);
         }
     }
 
