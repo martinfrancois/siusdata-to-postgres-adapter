@@ -16,6 +16,7 @@ import org.testcontainers.containers.ToxiproxyContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -52,34 +53,41 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 "Docker environment is required for Testcontainers-based integration tests"
         );
 
-        network = Network.newNetwork();
+        try {
+            network = Network.newNetwork();
 
-        postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
-                .withDatabaseName("test")
-                .withUsername("test")
-                .withPassword("test")
-                .withNetwork(network)
-                .withNetworkAliases("postgres")
-                .withExposedPorts(5432)
-                .waitingFor(new TestContainerPostgresWaitStrategy());
+            postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
+                    .withDatabaseName("test")
+                    .withUsername("test")
+                    .withPassword("test")
+                    .withNetwork(network)
+                    .withNetworkAliases("postgres")
+                    .withExposedPorts(5432)
+                    .waitingFor(new TestContainerPostgresWaitStrategy());
 
-        postgreSQLContainer.start();
+            postgreSQLContainer.start();
 
-        // Initialize Toxiproxy container and proxy for PostgreSQL
-        toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.10.0")
-                .withNetwork(network);
-        toxiproxy.start();
+            // Initialize Toxiproxy container and proxy for PostgreSQL
+            toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.10.0")
+                    .withNetwork(network);
+            toxiproxy.start();
 
-        toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
-        proxy = toxiproxyClient.createProxy("postgres", "0.0.0.0:8666", "postgres:5432");
+            toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
+            proxy = toxiproxyClient.createProxy("postgres", "0.0.0.0:8666", "postgres:5432");
 
-        // Create a temporary directory to act as the CSV directory to watch
-        tempDir = Files.createTempDirectory("siusdata_test");
+            // Create a temporary directory to act as the CSV directory to watch
+            tempDir = Files.createTempDirectory("siusdata_test");
+        } catch (Exception e) {
+            dockerEnvironmentAvailable = false;
+            cleanupResourcesSilently();
+            Assumptions.assumeTrue(false, "Failed to initialise Docker-based integration test environment: " + e.getMessage());
+        }
     }
 
     @AfterEach
     public void tearDown() throws Exception {
         if (!dockerEnvironmentAvailable) {
+            cleanupResourcesSilently();
             return;
         }
 
@@ -93,13 +101,70 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         }
 
         // Delete temporary directory and files
-        Files.walk(tempDir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete);
+        if (tempDir != null) {
+            Files.walk(tempDir)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+            tempDir = null;
+        }
 
-        postgreSQLContainer.stop();
-        toxiproxy.stop();
+        if (postgreSQLContainer != null) {
+            postgreSQLContainer.stop();
+            postgreSQLContainer = null;
+        }
+        if (toxiproxy != null) {
+            toxiproxy.stop();
+            toxiproxy = null;
+        }
+        if (network != null) {
+            network.close();
+            network = null;
+        }
+    }
+
+    private void cleanupResourcesSilently() {
+        if (adapter != null) {
+            adapter.shutdown();
+            adapter = null;
+        }
+        if (adapterThread != null) {
+            adapterThread.interrupt();
+            adapterThread = null;
+        }
+
+        if (tempDir != null) {
+            try {
+                Files.walk(tempDir)
+                        .sorted(Comparator.reverseOrder())
+                        .map(Path::toFile)
+                        .forEach(File::delete);
+            } catch (IOException ignored) {
+            }
+            tempDir = null;
+        }
+
+        if (postgreSQLContainer != null) {
+            try {
+                postgreSQLContainer.stop();
+            } catch (Exception ignored) {
+            }
+            postgreSQLContainer = null;
+        }
+        if (toxiproxy != null) {
+            try {
+                toxiproxy.stop();
+            } catch (Exception ignored) {
+            }
+            toxiproxy = null;
+        }
+        if (network != null) {
+            try {
+                network.close();
+            } catch (Exception ignored) {
+            }
+            network = null;
+        }
     }
 
     private boolean isDockerAvailable() {
