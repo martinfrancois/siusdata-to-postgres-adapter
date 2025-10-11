@@ -6,8 +6,10 @@ import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.ToxiproxyContainer;
@@ -39,9 +41,17 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     private ToxiproxyContainer toxiproxy;
     private Proxy proxy;
     private ToxiproxyClient toxiproxyClient;
+    private boolean dockerEnvironmentAvailable;
 
     @BeforeEach
     public void setUp() throws Exception {
+        dockerEnvironmentAvailable = isDockerAvailable();
+
+        Assumptions.assumeTrue(
+                dockerEnvironmentAvailable,
+                "Docker environment is required for Testcontainers-based integration tests"
+        );
+
         network = Network.newNetwork();
 
         postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
@@ -69,6 +79,10 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @AfterEach
     public void tearDown() throws Exception {
+        if (!dockerEnvironmentAvailable) {
+            return;
+        }
+
         // Shutdown the adapter
         if (adapter != null) {
             adapter.shutdown();
@@ -86,6 +100,15 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
         postgreSQLContainer.stop();
         toxiproxy.stop();
+    }
+
+    private boolean isDockerAvailable() {
+        try {
+            DockerClientFactory.instance().client();
+            return true;
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
 
     @Test
