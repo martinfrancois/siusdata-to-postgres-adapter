@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1030,11 +1031,11 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                             postgreSQLContainer.getJdbcUrl(),
                             postgreSQLContainer.getUsername(),
                             postgreSQLContainer.getPassword())) {
+                        long actualTotalRows;
                         try (Statement stmt = conn.createStatement();
                              ResultSet shotsCount = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots")) {
                             assertTrue(shotsCount.next(), "Expected a count row from siusdata_shots");
-                            assertEquals(expectedTotalRows, shotsCount.getLong(1),
-                                    "Total ingested rows should match the sum of data rows across all files");
+                            actualTotalRows = shotsCount.getLong(1);
                         }
 
                         Map<String, Integer> actualProgress = new LinkedHashMap<>();
@@ -1045,14 +1046,23 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                             }
                         }
 
+                        String progressDebugSummary = buildProgressDebugSummary(expectedLineCounts, actualProgress, actualTotalRows);
+
+                        assertEquals(expectedTotalRows, actualTotalRows,
+                                () -> "Total ingested rows should match the sum of data rows across all files.\n"
+                                        + progressDebugSummary);
+
                         assertEquals(expectedLineCounts.size(), actualProgress.size(),
-                                "file_progress should contain one entry per ingested file");
+                                () -> "file_progress should contain one entry per ingested file.\n"
+                                        + progressDebugSummary);
 
                         for (Map.Entry<String, Long> entry : expectedLineCounts.entrySet()) {
                             assertTrue(actualProgress.containsKey(entry.getKey()),
-                                    "Missing file_progress entry for " + entry.getKey());
+                                    () -> "Missing file_progress entry for " + entry.getKey() + ".\n"
+                                            + progressDebugSummary);
                             assertEquals(Math.toIntExact(entry.getValue()), actualProgress.get(entry.getKey()),
-                                    "File " + entry.getKey() + " should report processed data rows equal to its CSV content");
+                                    () -> "File " + entry.getKey() + " should report processed data rows equal to its CSV content.\n"
+                                            + progressDebugSummary);
                         }
 
                         for (String ignored : fixtures.ignoredFileNames()) {
@@ -1061,6 +1071,70 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                         }
                     }
                 });
+    }
+
+    private String buildProgressDebugSummary(Map<String, Long> expectedLineCounts,
+                                             Map<String, Integer> actualProgress,
+                                             long actualTotalRows) {
+        StringBuilder summary = new StringBuilder();
+
+        summary.append("Expected total rows: ")
+                .append(expectedLineCounts.values().stream().mapToLong(Long::longValue).sum())
+                .append(", actual total rows: ")
+                .append(actualTotalRows)
+                .append('\n');
+
+        summary.append("Expected line counts:\n");
+        expectedLineCounts.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> summary.append("  ")
+                        .append(entry.getKey())
+                        .append(": ")
+                        .append(entry.getValue())
+                        .append('\n'));
+
+        summary.append("Actual file progress:\n");
+        actualProgress.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> summary.append("  ")
+                        .append(entry.getKey())
+                        .append(": ")
+                        .append(entry.getValue())
+                        .append('\n'));
+
+        List<String> missingFiles = expectedLineCounts.keySet().stream()
+                .filter(file -> !actualProgress.containsKey(file))
+                .sorted()
+                .collect(Collectors.toList());
+        if (!missingFiles.isEmpty()) {
+            summary.append("Missing file_progress entries: ")
+                    .append(String.join(", ", missingFiles))
+                    .append('\n');
+        }
+
+        List<String> unexpectedFiles = actualProgress.keySet().stream()
+                .filter(file -> !expectedLineCounts.containsKey(file))
+                .sorted()
+                .collect(Collectors.toList());
+        if (!unexpectedFiles.isEmpty()) {
+            summary.append("Unexpected file_progress entries: ")
+                    .append(String.join(", ", unexpectedFiles))
+                    .append('\n');
+        }
+
+        List<String> mismatchedProgress = expectedLineCounts.entrySet().stream()
+                .filter(entry -> actualProgress.containsKey(entry.getKey()))
+                .filter(entry -> !entry.getValue().equals(Long.valueOf(actualProgress.get(entry.getKey()))))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + " (expected " + entry.getValue() + ", actual " + actualProgress.get(entry.getKey()) + ")")
+                .collect(Collectors.toList());
+        if (!mismatchedProgress.isEmpty()) {
+            summary.append("Mismatched progress counts: ")
+                    .append(String.join(", ", mismatchedProgress))
+                    .append('\n');
+        }
+
+        return summary.toString();
     }
 
     private boolean isSidecarFile(String fileName) {
