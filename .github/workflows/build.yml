@@ -1,26 +1,40 @@
-name: Build
+name: CI
 
 on:
+  pull_request:
+    branches: [ master ]
   push:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  release:
-    if: github.ref == 'refs/heads/master'
+  windows-native-check:
+    name: Windows Native Check
+    # Run on PRs to master and on pushes to master. Skip other push branches to save minutes.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup GraalVM
+      # Ensure MSVC toolchain is on PATH for native-image linking
+      - name: MSVC dev cmd
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup GraalVM (Java 21 + native-image)
         uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
         with:
+          distribution: graalvm
           java-version: '21'
-          distribution: 'graalvm'
+          components: native-image
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: gradle
 
-      - name: Verify GraalVM installation
+      - name: Verify toolchain
+        shell: pwsh
         run: |
           echo "GRAALVM_HOME: $env:GRAALVM_HOME"
           echo "JAVA_HOME: $env:JAVA_HOME"
@@ -28,20 +42,112 @@ jobs:
           native-image --version
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5
+        uses: gradle/actions/setup-gradle@v5
         with:
-          cache-disabled: true  # Disable caching here to avoid redundancy with the GraalVM setup
+          cache-disabled: true
+
+      - name: Unit tests
+        shell: pwsh
+        run: .\gradlew test --scan
+
+      - name: Build native image (Windows)
+        shell: pwsh
+        run: .\gradlew nativeCompile --scan
+
+      - name: Smoke test exe for reflection issues
+        shell: pwsh
+        env:
+          CSV_MONITOR_PATH: ${{ github.workspace }}\build\tmp\csv
+          POSTGRESQL_URL: jdbc:postgresql://127.0.0.1:5432/test
+          POSTGRESQL_USER: test
+          POSTGRESQL_PASSWORD: test
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:CSV_MONITOR_PATH" | Out-Null
+          $exe = "build\native\nativeCompile\siusdata-to-postgres-adapter.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Missing exe at $exe"; exit 1 }
+          $out = "native_stdout.txt"
+          $err = "native_stderr.txt"
+          $p = Start-Process -FilePath $exe -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          Start-Sleep -Seconds 8
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+
+          $stdout = Get-Content $out -Raw
+          $stderr = Get-Content $err -Raw
+
+          if ($stdout -match "MissingReflectionRegistrationError" -or $stderr -match "MissingReflectionRegistrationError") {
+            Write-Error "GraalVM reflection metadata missing"
+            Write-Host $stdout
+            Write-Host $stderr
+            exit 1
+          }
+
+          # Ensure we reached Hikari config logging, where your original crash happened
+          if (($stdout + $stderr) -notmatch "HikariConfig - .*configuration") {
+            Write-Error "Startup path not exercised to Hikari config"
+            Write-Host $stdout
+            Write-Host $stderr
+            exit 1
+          }
+
+          exit 0
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smoke-logs
+          path: |
+            native_stdout.txt
+            native_stderr.txt
+
+  release:
+    name: Release on master
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: windows-native-check
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: MSVC dev cmd
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          components: native-image
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: gradle
+
+      - name: Verify GraalVM installation
+        shell: pwsh
+        run: |
+          echo "GRAALVM_HOME: $env:GRAALVM_HOME"
+          echo "JAVA_HOME: $env:JAVA_HOME"
+          java --version
+          native-image --version
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-disabled: true
 
       - name: Build JAR with Gradle
+        shell: pwsh
         run: .\gradlew shadowJar --scan
 
       - name: Build Native Image for Windows
-        run: .\gradlew nativeCompile
+        shell: pwsh
+        run: .\gradlew nativeCompile --scan
 
       - name: Zip Native Executable and DLLs
+        shell: pwsh
         run: |
           $zipFile = "build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip"
-          Compress-Archive -Path "build/native/nativeCompile/siusdata-to-postgres-adapter*.exe", "build/native/nativeCompile/*.dll" -DestinationPath $zipFile
+          Compress-Archive -Force -Path "build/native/nativeCompile/siusdata-to-postgres-adapter*.exe","build/native/nativeCompile/*.dll" -DestinationPath $zipFile
 
       - name: Get current date
         id: date
@@ -62,21 +168,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    if: github.ref != 'refs/heads/master'
+    # Keep your Ubuntu build for non-master pushes
+    if: github.event_name == 'push' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
+      - name: Set up Java
+        uses: actions/setup-java@v5
         with:
+          distribution: 'zulu'
           java-version: '21'
-          distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          components: 'native-image'
-          cache: gradle
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
@@ -86,6 +190,3 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build --scan
-
-      - name: Build native image
-        run: ./gradlew nativeCompile --scan
