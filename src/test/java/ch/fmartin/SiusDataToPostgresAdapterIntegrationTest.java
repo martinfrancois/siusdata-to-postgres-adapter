@@ -106,7 +106,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         try {
             DockerClientFactory.instance().client();
             return true;
-        } catch (IllegalStateException e) {
+        } catch (RuntimeException e) {
             return false;
         }
     }
