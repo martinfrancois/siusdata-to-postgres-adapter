@@ -264,13 +264,13 @@ public class SiusDataToPostgresAdapter {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(jdbcUser);
         config.setPassword(jdbcPassword);
-        config.setMaximumPoolSize(2);
-        config.setMinimumIdle(1);
-        config.setIdleTimeout(120_000); // 2 minutes
-        config.setMaxLifetime(300_000); // 5 minutes
+        config.setMaximumPoolSize(1);
+        config.setMinimumIdle(0);
+        config.setIdleTimeout(5 * 60_000L); // 5 minutes
+        config.setMaxLifetime(30 * 60_000L); // 30 minutes
         config.setConnectionTimeout(30_000); // 30 seconds
         config.setValidationTimeout(5_000); // 5 seconds
-        config.setKeepaliveTime(180_000); // 3 minutes
+        config.setKeepaliveTime(5 * 60_000L); // 5 minutes
         config.setPoolName("SiusDataHikariCP");
 
         HikariDataSource ds = new HikariDataSource(config);
@@ -504,7 +504,7 @@ public class SiusDataToPostgresAdapter {
                     // Check if the file matches the CSV pattern
                     if (Files.isRegularFile(filePath) && isValidCsvFile(fileName)) {
                         if (kind == StandardWatchEventKinds.ENTRY_CREATE || kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                            logger.info("Detected {} event for file: {}", kind.name(), fileName);
+                            logger.debug("Detected {} event for file: {}", kind.name(), fileName);
                             submitFileForProcessing(filePath, false);
                         }
                     } else {
@@ -578,7 +578,7 @@ public class SiusDataToPostgresAdapter {
                 }
             });
         } else {
-            logger.info("File {} is already queued or being processed. Skipping submission.", fileName);
+            logger.debug("File {} is already queued or being processed. Skipping submission.", fileName);
         }
     }
 

@@ -423,7 +423,7 @@ public class SiusDataToPostgresAdapterTest {
         adapter.submitFileForProcessing(filePath, false);
 
         // then
-        verify(logger).info("File {} is already queued or being processed. Skipping submission.", "testfile.csv");
+        verify(logger).debug("File {} is already queued or being processed. Skipping submission.", "testfile.csv");
         verifyNoInteractions(executorService);
     }
 
