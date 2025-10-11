@@ -293,7 +293,7 @@ public class SiusDataToPostgresAdapterPropertyTest {
         int parameterIndex = 5;
         adapter.setBooleanField(statement, parameterIndex, input);
         verify(statement).setBoolean(parameterIndex, true);
-        verify(statement).setNull(anyInt(), anyInt());
+        verify(statement, never()).setNull(anyInt(), anyInt());
         verifyNoMoreInteractions(statement);
     }
 
