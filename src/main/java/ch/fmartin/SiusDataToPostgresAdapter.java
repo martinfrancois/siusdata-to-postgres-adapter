@@ -654,13 +654,7 @@ public class SiusDataToPostgresAdapter {
                     throw new SQLException("Obtained an invalid connection from the pool.");
                 }
 
-                // Disable auto-commit for transaction management
-                conn.setAutoCommit(false);
-                try (Statement s = conn.createStatement()) {
-                    s.execute("SET LOCAL statement_timeout = '10s'");
-                    s.execute("SET LOCAL lock_timeout = '2s'");
-                    s.execute("SET LOCAL idle_in_transaction_session_timeout = '30s'");
-                }
+                boolean transactionStarted = false;
 
                 try {
                     // Retrieve last processed line
@@ -673,6 +667,15 @@ public class SiusDataToPostgresAdapter {
                         logger.info("No new records to process in file: {}", fileNameWithExtension);
                         keepProcessing = false;
                         continue;
+                    }
+
+                    // Disable auto-commit for transaction management after parsing the CSV
+                    conn.setAutoCommit(false);
+                    transactionStarted = true;
+                    try (Statement s = conn.createStatement()) {
+                        s.execute("SET LOCAL statement_timeout = '10s'");
+                        s.execute("SET LOCAL lock_timeout = '2s'");
+                        s.execute("SET LOCAL idle_in_transaction_session_timeout = '30s'");
                     }
 
                     // Insert records into the database
@@ -704,13 +707,17 @@ public class SiusDataToPostgresAdapter {
                     logger.info("Successfully processed {} records from file: {}", processedCount, fileNameWithExtension);
 
                 } catch (Exception e) {
-                    // Rollback transaction on error
-                    conn.rollback();
+                    if (transactionStarted) {
+                        // Rollback transaction on error
+                        conn.rollback();
+                    }
                     logError("Error processing file " + fileNameWithExtension + ": " + e.getMessage(), e);
                     throw e; // Rethrow to trigger retry
                 } finally {
-                    // Restore auto-commit
-                    conn.setAutoCommit(true);
+                    if (transactionStarted) {
+                        // Restore auto-commit
+                        conn.setAutoCommit(true);
+                    }
                 }
 
             } catch (SQLException e) {
