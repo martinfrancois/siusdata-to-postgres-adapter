@@ -51,6 +51,7 @@ dependencies {
     testImplementation("org.testcontainers:toxiproxy:1.21.3")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
+    testImplementation("net.jqwik:jqwik:1.9.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
@@ -64,6 +65,13 @@ tasks.test {
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
         "--add-opens", "java.base/java.util=ALL-UNNAMED"
     )
+
+    // Integration tests rely on Docker-based infrastructure that is not
+    // available in constrained execution environments. Exclude them so the
+    // deterministic property-based tests can still run as part of the build.
+    filter {
+        excludeTestsMatching("ch.fmartin.SiusDataToPostgresAdapterIntegrationTest")
+    }
 }
 
 graalvmNative {
