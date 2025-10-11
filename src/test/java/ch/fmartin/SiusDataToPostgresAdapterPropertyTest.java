@@ -45,11 +45,16 @@ public class SiusDataToPostgresAdapterPropertyTest {
             "jdbc:postgresql://localhost/test",
             "user",
             "secret",
-            "push",
-            "https://gotify",
-            "token",
+            null,
+            null,
+            null,
             5
-        );
+        ) {
+            @Override
+            void sendNotifications(String title, String message) {
+                // Avoid real HTTP calls during property tests
+            }
+        };
     }
 
     private static Arbitrary<String> surroundingWhitespace() {

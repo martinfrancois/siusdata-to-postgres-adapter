@@ -45,3 +45,4 @@ bin/
 /logs
 /.idea
 .jqwik-database/
+.jqwik-database

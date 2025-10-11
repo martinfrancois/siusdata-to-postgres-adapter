@@ -52,6 +52,7 @@ dependencies {
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
     testImplementation("net.jqwik:jqwik:1.9.2")
+    testRuntimeOnly("net.jqwik:jqwik-engine:1.9.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
@@ -66,11 +67,23 @@ tasks.test {
         "--add-opens", "java.base/java.util=ALL-UNNAMED"
     )
 
-    // Integration tests rely on Docker-based infrastructure that is not
-    // available in constrained execution environments. Exclude them so the
-    // deterministic property-based tests can still run as part of the build.
+    val skipIntegrationTests = providers.provider {
+        val propertyValue = project.findProperty("skipIntegrationTests") as? String
+        val envValue = System.getenv("SKIP_INTEGRATION_TESTS")
+
+        fun String.isTruthy(): Boolean = equals("true", ignoreCase = true) || this == "1" || equals("yes", ignoreCase = true)
+
+        sequenceOf(propertyValue, envValue)
+            .filterNotNull()
+            .firstOrNull { it.isNotBlank() }
+            ?.let { it.isTruthy() }
+            ?: false
+    }
+
     filter {
-        excludeTestsMatching("ch.fmartin.SiusDataToPostgresAdapterIntegrationTest")
+        if (skipIntegrationTests.get()) {
+            excludeTestsMatching("ch.fmartin.SiusDataToPostgresAdapterIntegrationTest")
+        }
     }
 }
 
