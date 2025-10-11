@@ -22,8 +22,15 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.io.BufferedReader;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -454,6 +461,80 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     }
 
     @Test
+    public void testStressTestFolderWithoutAllCsv() throws Exception {
+        Path stressWorkDir = Files.createTempDirectory(tempDir, "stresstest-individual-");
+        StressTestFixtures fixtures = prepareStressTestFiles(
+                Path.of("src/test/resources/stresstest/individual").toAbsolutePath(),
+                stressWorkDir);
+
+        assertFalse(fixtures.expectedLineCounts().isEmpty(), "Expected stresstest fixtures without all.csv");
+        assertFalse(fixtures.ignoredFileNames().isEmpty(), "Sidecar fixtures should be present to verify they are ignored");
+        assertFalse(fixtures.expectedLineCounts().containsKey("all.csv"), "all.csv should not be included in the individual fixtures");
+
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", stressWorkDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(2, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isInitialized());
+
+                    assertIngestionResults(fixtures);
+                });
+    }
+
+    @Test
+    public void testStressTestFolderAllCsvOnly() throws Exception {
+        Path stressWorkDir = Files.createTempDirectory(tempDir, "stresstest-all-");
+        StressTestFixtures fixtures = prepareStressTestFiles(
+                Path.of("src/test/resources/stresstest/all").toAbsolutePath(),
+                stressWorkDir);
+
+        assertEquals(1, fixtures.expectedLineCounts().size(), "Expected exactly one CSV file when copying all.csv");
+        assertTrue(fixtures.expectedLineCounts().containsKey("all.csv"), "all.csv should be present in the copied fixtures");
+        assertTrue(fixtures.ignoredFileNames().isEmpty(), "The all.csv fixture set should not include sidecar files");
+
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", stressWorkDir.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(2, TimeUnit.MINUTES)
+                            .pollInterval(1, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isInitialized());
+
+                    assertIngestionResults(fixtures);
+                });
+    }
+
+    @Test
     public void testProcessingNewFileAfterStart() throws Exception {
         SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
@@ -876,6 +957,133 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                         return false;
                     }
                 });
+    }
+
+    private StressTestFixtures prepareStressTestFiles(Path sourceDir, Path destinationDir) throws Exception {
+        Map<String, Long> expectedLineCounts = new LinkedHashMap<>();
+        List<String> ignoredFileNames = new ArrayList<>();
+
+        List<Path> csvFiles;
+        try (Stream<Path> files = Files.list(sourceDir)) {
+            csvFiles = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".csv"))
+                    .sorted()
+                    .toList();
+        }
+
+        for (Path source : csvFiles) {
+            Path target = destinationDir.resolve(source.getFileName());
+            Files.copy(source, target);
+
+            String fileName = source.getFileName().toString();
+            if (isSidecarFile(fileName)) {
+                ignoredFileNames.add(fileName);
+            } else {
+                expectedLineCounts.put(fileName, countDataLines(source));
+            }
+        }
+
+        return new StressTestFixtures(expectedLineCounts, ignoredFileNames);
+    }
+
+    private long countDataLines(Path csvFile) throws Exception {
+        try (BufferedReader reader = Files.newBufferedReader(csvFile)) {
+            String firstLine = reader.readLine();
+            if (firstLine == null) {
+                return 0;
+            }
+            long remaining = reader.lines().count();
+            return isHeaderLine(firstLine) ? remaining : remaining + 1;
+        }
+    }
+
+    private boolean isHeaderLine(String firstLine) {
+        if (firstLine.isEmpty()) {
+            return true;
+        }
+        String[] parts = firstLine.split(";", -1);
+        if (parts.length == 0) {
+            return true;
+        }
+        String firstField = parts[0];
+        if (firstField.isEmpty()) {
+            return true;
+        }
+        try {
+            Long.parseLong(firstField);
+            return false;
+        } catch (NumberFormatException ex) {
+            return true;
+        }
+    }
+
+    private void assertIngestionResults(StressTestFixtures fixtures) throws Exception {
+        Map<String, Long> expectedLineCounts = fixtures.expectedLineCounts();
+        long expectedTotalRows = expectedLineCounts.values().stream().mapToLong(Long::longValue).sum();
+
+        Awaitility.await()
+                .atMost(5, TimeUnit.MINUTES)
+                .pollInterval(2, TimeUnit.SECONDS)
+                .untilAsserted(() -> {
+                    try (Connection conn = DriverManager.getConnection(
+                            postgreSQLContainer.getJdbcUrl(),
+                            postgreSQLContainer.getUsername(),
+                            postgreSQLContainer.getPassword())) {
+                        try (Statement stmt = conn.createStatement();
+                             ResultSet shotsCount = stmt.executeQuery("SELECT COUNT(*) FROM siusdata_shots")) {
+                            assertTrue(shotsCount.next(), "Expected a count row from siusdata_shots");
+                            assertEquals(expectedTotalRows, shotsCount.getLong(1),
+                                    "Total ingested rows should match the sum of data rows across all files");
+                        }
+
+                        Map<String, Integer> actualProgress = new LinkedHashMap<>();
+                        try (Statement stmt = conn.createStatement();
+                             ResultSet progress = stmt.executeQuery("SELECT file_name, last_processed_line FROM file_progress ORDER BY file_name")) {
+                            while (progress.next()) {
+                                actualProgress.put(progress.getString(1), progress.getInt(2));
+                            }
+                        }
+
+                        assertEquals(expectedLineCounts.size(), actualProgress.size(),
+                                "file_progress should contain one entry per ingested file");
+
+                        for (Map.Entry<String, Long> entry : expectedLineCounts.entrySet()) {
+                            assertTrue(actualProgress.containsKey(entry.getKey()),
+                                    "Missing file_progress entry for " + entry.getKey());
+                            assertEquals(Math.toIntExact(entry.getValue()), actualProgress.get(entry.getKey()),
+                                    "File " + entry.getKey() + " should report processed data rows equal to its CSV content");
+                        }
+
+                        for (String ignored : fixtures.ignoredFileNames()) {
+                            assertFalse(actualProgress.containsKey(ignored),
+                                    "Sidecar file " + ignored + " should not have been ingested");
+                        }
+                    }
+                });
+    }
+
+    private boolean isSidecarFile(String fileName) {
+        String lowerName = fileName.toLowerCase(Locale.ROOT);
+        return lowerName.endsWith("_stl.csv") || lowerName.endsWith("_mod.csv");
+    }
+
+    private static class StressTestFixtures {
+        private final Map<String, Long> expectedLineCounts;
+        private final List<String> ignoredFileNames;
+
+        private StressTestFixtures(Map<String, Long> expectedLineCounts, List<String> ignoredFileNames) {
+            this.expectedLineCounts = expectedLineCounts;
+            this.ignoredFileNames = ignoredFileNames;
+        }
+
+        private Map<String, Long> expectedLineCounts() {
+            return expectedLineCounts;
+        }
+
+        private List<String> ignoredFileNames() {
+            return ignoredFileNames;
+        }
     }
 
     @Test
