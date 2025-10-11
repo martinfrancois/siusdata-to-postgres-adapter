@@ -12,7 +12,6 @@ concurrency:
 jobs:
   windows-native-check:
     name: Windows Native Check
-    # Run on PRs to master and on pushes to master. Skip other push branches to save minutes.
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
 
@@ -20,7 +19,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      # Ensure MSVC toolchain is on PATH for native-image linking
       - name: MSVC dev cmd
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -49,6 +47,10 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: .\gradlew test --scan
+
+      - name: Build JAR (shadow)
+        shell: pwsh
+        run: .\gradlew shadowJar --scan
 
       - name: Build native image (Windows)
         shell: pwsh
@@ -81,15 +83,12 @@ jobs:
             exit 1
           }
 
-          # Ensure we reached Hikari config logging, where your original crash happened
           if (($stdout + $stderr) -notmatch "HikariConfig - .*configuration") {
             Write-Error "Startup path not exercised to Hikari config"
             Write-Host $stdout
             Write-Host $stderr
             exit 1
           }
-
-          exit 0
 
       - name: Upload smoke logs on failure
         if: failure()
@@ -100,61 +99,57 @@ jobs:
             native_stdout.txt
             native_stderr.txt
 
-  release:
-    name: Release on master
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: windows-native-check
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: MSVC dev cmd
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
-        with:
-          java-version: '21'
-          distribution: 'graalvm'
-          components: native-image
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: gradle
-
-      - name: Verify GraalVM installation
-        shell: pwsh
-        run: |
-          echo "GRAALVM_HOME: $env:GRAALVM_HOME"
-          echo "JAVA_HOME: $env:JAVA_HOME"
-          java --version
-          native-image --version
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5
-        with:
-          cache-disabled: true  # Disable caching here to avoid redundancy with the GraalVM setup
-
-      - name: Build JAR with Gradle
-        shell: pwsh
-        run: .\gradlew shadowJar --scan
-
-      - name: Build Native Image for Windows
-        shell: pwsh
-        run: .\gradlew nativeCompile --scan
-
+      # Only package + upload artifacts on push to master
       - name: Zip Native Executable and DLLs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: pwsh
         run: |
           $zipFile = "build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip"
           Compress-Archive -Force -Path "build/native/nativeCompile/siusdata-to-postgres-adapter*.exe","build/native/nativeCompile/*.dll" -DestinationPath $zipFile
 
+      - name: Upload native zip artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-zip
+          path: build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip
+          if-no-files-found: error
+
+      - name: Upload JAR artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-jar
+          path: build/libs/siusdata-to-postgres-adapter*.jar
+          if-no-files-found: error
+
+  release:
+    name: Release on master
+    # No Windows required here. We only download artifacts and publish the release.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: windows-native-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download native zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-zip
+          path: dist
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shadow-jar
+          path: dist
+
       - name: Get current date
         id: date
-        shell: pwsh
-        run: |
-          $date = (Get-Date -UFormat "%Y-%m-%dT%H-%M-%SZ")
-          echo "date=$date" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        shell: bash
+        run: echo "date=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release and Upload Artifacts
         uses: softprops/action-gh-release@aec2ec56f94eb8180ceec724245f64ef008b89f5 # v2
@@ -162,31 +157,25 @@ jobs:
           tag_name: ${{ steps.date.outputs.date }}
           name: Release ${{ steps.date.outputs.date }}
           files: |
-            build/libs/siusdata-to-postgres-adapter*.jar
-            build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip
+            dist/siusdata-to-postgres-adapter*.jar
+            dist/siusdata-to-postgres-adapter-native-executable.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    # Keep your Ubuntu build for non-master pushes
     if: github.event_name == 'push' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '21'
-
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
-
+        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5
       - name: Run unit tests
         run: ./gradlew test --scan
-
       - name: Build with Gradle
         run: ./gradlew build --scan
