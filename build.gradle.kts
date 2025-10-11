@@ -66,6 +66,7 @@ tasks.test {
 }
 
 graalvmNative {
+    toolchainDetection.set(false)
     binaries.all {
         resources.autodetect()
         buildArgs.add("--enable-url-protocols=https") // Enable HTTPS protocol
