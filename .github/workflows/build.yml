@@ -24,10 +24,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
 
       # Validate Gradle Wrapper (supply-chain hardening)
       - name: Validate Gradle Wrapper
-        uses: gradle/wrapper-validation-action@v2
+        uses: gradle/wrapper-validation-action@8c938e5ff0b5e6f3e2d5f2309c8ca9b2346b89fe # v2
 
       - name: MSVC dev cmd
         uses: ilammy/msvc-dev-cmd@v1
