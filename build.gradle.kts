@@ -60,7 +60,9 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        includeEngines("junit-jupiter", "jqwik")
+    }
     // fix for: "Unable to make field private final java.util.Map java.util.Collections$UnmodifiableMap.m accessible: module java.base does not "opens java.util" to unnamed module"
     jvmArgs = listOf(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
