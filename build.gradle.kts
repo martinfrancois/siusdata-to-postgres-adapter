@@ -68,7 +68,12 @@ tasks.test {
 graalvmNative {
     toolchainDetection.set(false)
     binaries.all {
-        resources.autodetect()
+        resources {
+            // On Windows CI runners the Gradle caches live on a different drive than the checkout
+            // directory. Using explicit resource includes avoids "'other' has different root"
+            // errors when the plugin tries to relativize those paths during native-image builds.
+            includedPatterns.add("logback.xml")
+        }
         buildArgs.add("--enable-url-protocols=https") // Enable HTTPS protocol
     }
     metadataRepository {
