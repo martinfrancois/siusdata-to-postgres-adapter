@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [ master ]
   push:
+  workflow_dispatch:
+
+# Default to least-privilege; the release job overrides to contents: write
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,10 +19,15 @@ jobs:
     name: Windows Native Check
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      # Validate Gradle Wrapper (supply-chain hardening)
+      - name: Validate Gradle Wrapper
+        uses: gradle/wrapper-validation-action@v2
 
       - name: MSVC dev cmd
         uses: ilammy/msvc-dev-cmd@v1
@@ -44,17 +54,13 @@ jobs:
         with:
           cache-disabled: true  # Disable caching here to avoid redundancy with the GraalVM setup
 
-      - name: Unit tests
-        shell: pwsh
-        run: .\gradlew test --scan
-
       - name: Build JAR (shadow)
         shell: pwsh
-        run: .\gradlew shadowJar --scan
+        run: .\gradlew shadowJar --no-daemon --scan
 
       - name: Build native image (Windows)
         shell: pwsh
-        run: .\gradlew nativeCompile --scan
+        run: .\gradlew nativeCompile --no-daemon --scan
 
       - name: Smoke test exe for reflection issues
         shell: pwsh
@@ -98,6 +104,7 @@ jobs:
           path: |
             native_stdout.txt
             native_stderr.txt
+          retention-days: 14
 
       # Only package + upload artifacts on push to master
       - name: Zip Native Executable and DLLs
@@ -114,6 +121,7 @@ jobs:
           name: native-zip
           path: build/native/nativeCompile/siusdata-to-postgres-adapter-native-executable.zip
           if-no-files-found: error
+          retention-days: 14
 
       - name: Upload JAR artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -122,12 +130,16 @@ jobs:
           name: shadow-jar
           path: build/libs/siusdata-to-postgres-adapter*.jar
           if-no-files-found: error
+          retention-days: 14
 
   release:
     name: Release on master
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: test-native-windows
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -155,6 +167,7 @@ jobs:
         with:
           tag_name: ${{ steps.date.outputs.date }}
           name: Release ${{ steps.date.outputs.date }}
+          fail_on_unmatched_files: true
           files: |
             dist/siusdata-to-postgres-adapter*.jar
             dist/siusdata-to-postgres-adapter-native-executable.zip
@@ -164,6 +177,7 @@ jobs:
   test:
     if: github.event_name == 'push' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -175,6 +189,6 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5
       - name: Run unit tests
-        run: ./gradlew test --scan
+        run: ./gradlew test --no-daemon --scan
       - name: Build with Gradle
-        run: ./gradlew build --scan
+        run: ./gradlew build --no-daemon --scan
