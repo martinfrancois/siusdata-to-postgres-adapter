@@ -833,7 +833,7 @@ public class SiusDataToPostgresAdapterTest {
         CsvRecord csvRecord = csvRecords.getFirst();
 
         // when
-        adapter.insertRecordIntoDatabase(mockConnection, csvRecord, "20210000.csv");
+        adapter.populateInsertStatement(mockStatement, csvRecord, "20210000.csv");
 
         // then
         verify(mockStatement, atLeastOnce()).setInt(anyInt(), anyInt());
@@ -841,8 +841,6 @@ public class SiusDataToPostgresAdapterTest {
         verify(mockStatement, atLeastOnce()).setBoolean(anyInt(), anyBoolean());
         verify(mockStatement, atLeastOnce()).setLong(anyInt(), anyLong());
         verify(mockStatement, atLeastOnce()).setTimestamp(anyInt(), any(Timestamp.class));
-        verify(mockStatement).executeUpdate();
-        verify(mockStatement).close();
     }
 
     @Test

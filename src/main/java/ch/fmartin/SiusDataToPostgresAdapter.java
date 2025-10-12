@@ -61,6 +61,12 @@ public class SiusDataToPostgresAdapter {
     // CSV file must start with eight digits, can be followed by anything, must end with .csv
     private static final Pattern CSV_FILE_PATTERN = Pattern.compile("^\\d{8}.*\\.csv$", Pattern.CASE_INSENSITIVE);
 
+    private static final String INSERT_SIUSDATA_SHOT_SQL = "INSERT INTO siusdata_shots (" +
+            "filename, start_number, score, phase, target_number, score2, score3, time, is_inner_ten, coordinate_x, " +
+            "coordinate_y, is_in_time, light_phase_time_span, is_right_sweep, is_demo, shoot_ordinal, practice_ordinal, " +
+            "manual_status, total_kind, group_ordinal, fire_kind, log_event_id, log_type, date, relay, weapon, position, " +
+            "target_code, external_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
     // is true when it has processed all existing files upon startup
     private boolean initialized = false;
 
@@ -648,8 +654,7 @@ public class SiusDataToPostgresAdapter {
                     throw new SQLException("Obtained an invalid connection from the pool.");
                 }
 
-                // Disable auto-commit for transaction management
-                conn.setAutoCommit(false);
+                boolean transactionStarted = false;
 
                 try {
                     // Retrieve last processed line
@@ -664,15 +669,33 @@ public class SiusDataToPostgresAdapter {
                         continue;
                     }
 
+                    // Disable auto-commit for transaction management after parsing the CSV
+                    conn.setAutoCommit(false);
+                    transactionStarted = true;
+                    try (Statement s = conn.createStatement()) {
+                        s.execute("SET LOCAL statement_timeout = '10s'");
+                        s.execute("SET LOCAL lock_timeout = '2s'");
+                        s.execute("SET LOCAL idle_in_transaction_session_timeout = '30s'");
+                    }
+
                     // Insert records into the database
                     int processedCount = 0;
-                    for (CsvRecord record : newRecords) {
-                        try {
-                            insertRecordIntoDatabase(conn, record, fileNameWithExtension);
-                            processedCount++;
-                        } catch (SQLException e) {
-                            logError("Failed to insert record at line " + (lastProcessedLine + processedCount + 1) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
-                            throw e; // rethrow to trigger retry
+                    try (PreparedStatement insertStmt = conn.prepareStatement(INSERT_SIUSDATA_SHOT_SQL)) {
+                        for (CsvRecord record : newRecords) {
+                            try {
+                                populateInsertStatement(insertStmt, record, fileNameWithExtension);
+                                insertStmt.executeUpdate();
+                                processedCount++;
+                            } catch (SQLException e) {
+                                logError("Failed to insert record at line " + (lastProcessedLine + processedCount + 1) + " in file " + fileNameWithExtension + ": " + e.getMessage(), e);
+                                throw e; // rethrow to trigger retry
+                            } finally {
+                                try {
+                                    insertStmt.clearParameters();
+                                } catch (SQLException clearEx) {
+                                    logger.warn("Failed to clear parameters for insert statement: {}", clearEx.getMessage(), clearEx);
+                                }
+                            }
                         }
                     }
 
@@ -684,13 +707,17 @@ public class SiusDataToPostgresAdapter {
                     logger.info("Successfully processed {} records from file: {}", processedCount, fileNameWithExtension);
 
                 } catch (Exception e) {
-                    // Rollback transaction on error
-                    conn.rollback();
+                    if (transactionStarted) {
+                        // Rollback transaction on error
+                        conn.rollback();
+                    }
                     logError("Error processing file " + fileNameWithExtension + ": " + e.getMessage(), e);
                     throw e; // Rethrow to trigger retry
                 } finally {
-                    // Restore auto-commit
-                    conn.setAutoCommit(true);
+                    if (transactionStarted) {
+                        // Restore auto-commit
+                        conn.setAutoCommit(true);
+                    }
                 }
 
             } catch (SQLException e) {
@@ -774,114 +801,99 @@ public class SiusDataToPostgresAdapter {
      * @param fileNameWithExtension The name of the file being processed.
      * @throws SQLException If a database access error occurs.
      */
-    void insertRecordIntoDatabase(Connection conn, CsvRecord record, String fileNameWithExtension) throws SQLException {
-        String query = "INSERT INTO siusdata_shots (" +
-                "filename, start_number, score, phase, target_number, score2, score3, time, " +
-                "is_inner_ten, coordinate_x, coordinate_y, is_in_time, light_phase_time_span, " +
-                "is_right_sweep, is_demo, shoot_ordinal, practice_ordinal, manual_status, " +
-                "total_kind, group_ordinal, fire_kind, log_event_id, log_type, date, " +
-                "relay, weapon, position, target_code, external_number" +
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    void populateInsertStatement(PreparedStatement stmt, CsvRecord record, String fileNameWithExtension) throws SQLException {
+        // Field indices based on CSV column order (0-based)
+        // 1. filename of the csv file (TEXT)
+        stmt.setString(1, fileNameWithExtension);
 
-        try (PreparedStatement stmt = conn.prepareStatement(query)) {
-            // Parsing and setting fields with validation
-            // Field indices based on CSV column order (0-based)
+        // 2. start_number (INT) - Column 0
+        setIntegerField(stmt, 2, record.getField(0));
 
-            // 1. filename of the csv file (TEXT)
-            stmt.setString(1, fileNameWithExtension);
+        // 3. score (TEXT) - Column 1
+        setTextField(stmt, 3, record.getField(1));
 
-            // 2. start_number (INT) - Column 0
-            setIntegerField(stmt, 2, record.getField(0));
+        // 4. phase (INT) - Column 2
+        setIntegerField(stmt, 4, record.getField(2));
 
-            // 3. score (TEXT) - Column 1
-            setTextField(stmt, 3, record.getField(1));
+        // 5. target_number (INT) - Column 3
+        setIntegerField(stmt, 5, record.getField(3));
 
-            // 4. phase (INT) - Column 2
-            setIntegerField(stmt, 4, record.getField(2));
+        // 6. score2 (TEXT) - Column 4
+        setTextField(stmt, 6, record.getField(4));
 
-            // 5. target_number (INT) - Column 3
-            setIntegerField(stmt, 5, record.getField(3));
+        // 7. score3 (TEXT) - Column 5
+        setTextField(stmt, 7, record.getField(5));
 
-            // 6. score2 (TEXT) - Column 4
-            setTextField(stmt, 6, record.getField(4));
+        // 8. time (TEXT) - Column 6
+        setTextField(stmt, 8, record.getField(6));
 
-            // 7. score3 (TEXT) - Column 5
-            setTextField(stmt, 7, record.getField(5));
+        // 9. is_inner_ten (BOOLEAN) - Column 7
+        setBooleanField(stmt, 9, record.getField(7));
 
-            // 8. time (TEXT) - Column 6
-            setTextField(stmt, 8, record.getField(6));
+        // 10. coordinate_x (TEXT) - Column 8
+        setTextField(stmt, 10, record.getField(8));
 
-            // 9. is_inner_ten (BOOLEAN) - Column 7
-            setBooleanField(stmt, 9, record.getField(7));
+        // 11. coordinate_y (TEXT) - Column 9
+        setTextField(stmt, 11, record.getField(9));
 
-            // 10. coordinate_x (TEXT) - Column 8
-            setTextField(stmt, 10, record.getField(8));
+        // 12. is_in_time (BOOLEAN) - Column 10
+        setBooleanField(stmt, 12, record.getField(10));
 
-            // 11. coordinate_y (TEXT) - Column 9
-            setTextField(stmt, 11, record.getField(9));
+        // 13. light_phase_time_span (TEXT) - Column 11
+        setTextField(stmt, 13, record.getField(11));
 
-            // 12. is_in_time (BOOLEAN) - Column 10
-            setBooleanField(stmt, 12, record.getField(10));
+        // 14. is_right_sweep (BOOLEAN) - Column 12
+        setBooleanField(stmt, 14, record.getField(12));
 
-            // 13. light_phase_time_span (TEXT) - Column 11
-            setTextField(stmt, 13, record.getField(11));
+        // 15. is_demo (BOOLEAN) - Column 13
+        setBooleanField(stmt, 15, record.getField(13));
 
-            // 14. is_right_sweep (BOOLEAN) - Column 12
-            setBooleanField(stmt, 14, record.getField(12));
+        // 16. shoot_ordinal (INT) - Column 14
+        setIntegerField(stmt, 16, record.getField(14));
 
-            // 15. is_demo (BOOLEAN) - Column 13
-            setBooleanField(stmt, 15, record.getField(13));
+        // 17. practice_ordinal (INT) - Column 15
+        setIntegerField(stmt, 17, record.getField(15));
 
-            // 16. shoot_ordinal (INT) - Column 14
-            setIntegerField(stmt, 16, record.getField(14));
+        // 18. manual_status (INT) - Column 16
+        setIntegerField(stmt, 18, record.getField(16));
 
-            // 17. practice_ordinal (INT) - Column 15
-            setIntegerField(stmt, 17, record.getField(15));
+        // 19. total_kind (INT) - Column 17
+        setIntegerField(stmt, 19, record.getField(17));
 
-            // 18. manual_status (INT) - Column 16
-            setIntegerField(stmt, 18, record.getField(16));
+        // 20. group_ordinal (INT) - Column 18
+        setIntegerField(stmt, 20, record.getField(18));
 
-            // 19. total_kind (INT) - Column 17
-            setIntegerField(stmt, 19, record.getField(17));
+        // 21. fire_kind (INT) - Column 19
+        setIntegerField(stmt, 21, record.getField(19));
 
-            // 20. group_ordinal (INT) - Column 18
-            setIntegerField(stmt, 20, record.getField(18));
+        // 22. log_event_id (BIGINT) - Column 20
+        setLongField(stmt, 22, record.getField(20));
 
-            // 21. fire_kind (INT) - Column 19
-            setIntegerField(stmt, 21, record.getField(19));
+        // 23. log_type (INT) - Column 21
+        setIntegerField(stmt, 23, record.getField(21));
 
-            // 22. log_event_id (BIGINT) - Column 20
-            setLongField(stmt, 22, record.getField(20));
-
-            // 23. log_type (INT) - Column 21
-            setIntegerField(stmt, 23, record.getField(21));
-
-            // 24. date (TIMESTAMP) - Column 22
-            Timestamp calculatedTimestamp = calculateTimestamp(record.getField(22), fileNameWithExtension);
-            if (calculatedTimestamp != null) {
-                stmt.setTimestamp(24, calculatedTimestamp);
-            } else {
-                stmt.setNull(24, Types.TIMESTAMP);
-            }
-
-            // 25. relay (INT) - Column 23
-            setIntegerField(stmt, 25, record.getField(23));
-
-            // 26. weapon (INT) - Column 24
-            setIntegerField(stmt, 26, record.getField(24));
-
-            // 27. position (INT) - Column 25
-            setIntegerField(stmt, 27, record.getField(25));
-
-            // 28. target_code (INT) - Column 26
-            setIntegerField(stmt, 28, record.getField(26));
-
-            // 29. external_number (INT) - Column 27
-            setIntegerField(stmt, 29, record.getField(27));
-
-            // Execute the insert statement
-            stmt.executeUpdate();
+        // 24. date (TIMESTAMP) - Column 22
+        Timestamp calculatedTimestamp = calculateTimestamp(record.getField(22), fileNameWithExtension);
+        if (calculatedTimestamp != null) {
+            stmt.setTimestamp(24, calculatedTimestamp);
+        } else {
+            stmt.setNull(24, Types.TIMESTAMP);
         }
+
+        // 25. relay (INT) - Column 23
+        setIntegerField(stmt, 25, record.getField(23));
+
+        // 26. weapon (INT) - Column 24
+        setIntegerField(stmt, 26, record.getField(24));
+
+        // 27. position (INT) - Column 25
+        setIntegerField(stmt, 27, record.getField(25));
+
+        // 28. target_code (INT) - Column 26
+        setIntegerField(stmt, 28, record.getField(26));
+
+        // 29. external_number (INT) - Column 27
+        setIntegerField(stmt, 29, record.getField(27));
     }
 
     /**
