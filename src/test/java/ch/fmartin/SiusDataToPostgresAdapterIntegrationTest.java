@@ -1046,7 +1046,28 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                             }
                         }
 
-                        String progressDebugSummary = buildProgressDebugSummary(expectedLineCounts, actualProgress, actualTotalRows);
+                        long summedProgressRows = actualProgress.values().stream()
+                                .mapToLong(Integer::longValue)
+                                .sum();
+
+                        Map<String, Long> actualShotsByFile = new LinkedHashMap<>();
+                        try (Statement stmt = conn.createStatement();
+                             ResultSet shotsPerFile = stmt.executeQuery(
+                                     "SELECT COALESCE(filename, '<null>') AS file_name, COUNT(*) AS shot_count "
+                                             + "FROM siusdata_shots "
+                                             + "GROUP BY COALESCE(filename, '<null>') "
+                                             + "ORDER BY file_name")) {
+                            while (shotsPerFile.next()) {
+                                actualShotsByFile.put(shotsPerFile.getString(1), shotsPerFile.getLong(2));
+                            }
+                        }
+
+                        String progressDebugSummary = buildProgressDebugSummary(
+                                expectedLineCounts,
+                                actualProgress,
+                                actualTotalRows,
+                                summedProgressRows,
+                                actualShotsByFile);
 
                         assertEquals(expectedTotalRows, actualTotalRows,
                                 () -> "Total ingested rows should match the sum of data rows across all files.\n"
@@ -1075,13 +1096,24 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     private String buildProgressDebugSummary(Map<String, Long> expectedLineCounts,
                                              Map<String, Integer> actualProgress,
-                                             long actualTotalRows) {
+                                             long actualTotalRows,
+                                             long summedProgressRows,
+                                             Map<String, Long> actualShotsByFile) {
         StringBuilder summary = new StringBuilder();
 
         summary.append("Expected total rows: ")
                 .append(expectedLineCounts.values().stream().mapToLong(Long::longValue).sum())
                 .append(", actual total rows: ")
                 .append(actualTotalRows)
+                .append('\n');
+
+        summary.append("Sum of file_progress last_processed_line values: ")
+                .append(summedProgressRows)
+                .append('\n');
+
+        long totalShotsByFile = actualShotsByFile.values().stream().mapToLong(Long::longValue).sum();
+        summary.append("Total shots grouped by filename: ")
+                .append(totalShotsByFile)
                 .append('\n');
 
         summary.append("Expected line counts:\n");
@@ -1095,6 +1127,15 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
         summary.append("Actual file progress:\n");
         actualProgress.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> summary.append("  ")
+                        .append(entry.getKey())
+                        .append(": ")
+                        .append(entry.getValue())
+                        .append('\n'));
+
+        summary.append("Actual shots by file:\n");
+        actualShotsByFile.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .forEach(entry -> summary.append("  ")
                         .append(entry.getKey())
@@ -1131,6 +1172,38 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         if (!mismatchedProgress.isEmpty()) {
             summary.append("Mismatched progress counts: ")
                     .append(String.join(", ", mismatchedProgress))
+                    .append('\n');
+        }
+
+        List<String> missingShotFiles = expectedLineCounts.keySet().stream()
+                .filter(file -> !actualShotsByFile.containsKey(file))
+                .sorted()
+                .collect(Collectors.toList());
+        if (!missingShotFiles.isEmpty()) {
+            summary.append("Missing siusdata_shots entries: ")
+                    .append(String.join(", ", missingShotFiles))
+                    .append('\n');
+        }
+
+        List<String> unexpectedShotFiles = actualShotsByFile.keySet().stream()
+                .filter(file -> !expectedLineCounts.containsKey(file))
+                .sorted()
+                .collect(Collectors.toList());
+        if (!unexpectedShotFiles.isEmpty()) {
+            summary.append("Unexpected siusdata_shots entries: ")
+                    .append(String.join(", ", unexpectedShotFiles))
+                    .append('\n');
+        }
+
+        List<String> mismatchedShotCounts = expectedLineCounts.entrySet().stream()
+                .filter(entry -> actualShotsByFile.containsKey(entry.getKey()))
+                .filter(entry -> !entry.getValue().equals(actualShotsByFile.get(entry.getKey())))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + " (expected " + entry.getValue() + ", actual " + actualShotsByFile.get(entry.getKey()) + ")")
+                .collect(Collectors.toList());
+        if (!mismatchedShotCounts.isEmpty()) {
+            summary.append("Mismatched siusdata_shots counts: ")
+                    .append(String.join(", ", mismatchedShotCounts))
                     .append('\n');
         }
 
