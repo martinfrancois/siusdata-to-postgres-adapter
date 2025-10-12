@@ -51,6 +51,8 @@ dependencies {
     testImplementation("org.testcontainers:toxiproxy:1.21.3")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
+    testImplementation("net.jqwik:jqwik:1.9.2")
+    testRuntimeOnly("net.jqwik:jqwik-engine:1.9.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
@@ -58,12 +60,33 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        includeEngines("junit-jupiter", "jqwik")
+    }
     // fix for: "Unable to make field private final java.util.Map java.util.Collections$UnmodifiableMap.m accessible: module java.base does not "opens java.util" to unnamed module"
     jvmArgs = listOf(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
         "--add-opens", "java.base/java.util=ALL-UNNAMED"
     )
+
+    val skipIntegrationTests = providers.provider {
+        val propertyValue = project.findProperty("skipIntegrationTests") as? String
+        val envValue = System.getenv("SKIP_INTEGRATION_TESTS")
+
+        fun String.isTruthy(): Boolean = equals("true", ignoreCase = true) || this == "1" || equals("yes", ignoreCase = true)
+
+        sequenceOf(propertyValue, envValue)
+            .filterNotNull()
+            .firstOrNull { it.isNotBlank() }
+            ?.let { it.isTruthy() }
+            ?: false
+    }
+
+    filter {
+        if (skipIntegrationTests.get()) {
+            excludeTestsMatching("ch.fmartin.SiusDataToPostgresAdapterIntegrationTest")
+        }
+    }
 }
 
 graalvmNative {

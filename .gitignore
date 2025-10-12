@@ -44,3 +44,5 @@ bin/
 *.csv
 /logs
 /.idea
+.jqwik-database/
+.jqwik-database
