@@ -77,7 +77,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
             // Create a temporary directory to act as the CSV directory to watch
             tempDir = Files.createTempDirectory("siusdata_test");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             dockerEnvironmentAvailable = false;
             cleanupResourcesSilently();
             Assumptions.assumeTrue(false, "Failed to initialise Docker-based integration test environment: " + e.getMessage());
@@ -171,7 +171,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         try {
             DockerClientFactory.instance().client();
             return true;
-        } catch (RuntimeException e) {
+        } catch (Exception | LinkageError e) {
             return false;
         }
     }
