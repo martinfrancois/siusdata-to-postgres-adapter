@@ -13,7 +13,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
+        uses: graalvm/setup-graalvm@eec48106e0bf45f2976c2ff0c3e22395cced8243 # v1
         with:
           java-version: '21'
           distribution: 'graalvm'
