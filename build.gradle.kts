@@ -143,7 +143,13 @@ val jqfFuzzTasks = jqfTargets.map { method ->
         classpath = fuzz.runtimeClasspath
         mainClass.set("edu.berkeley.cs.jqf.fuzz.Launch")
         val outputDir = layout.buildDirectory.dir("jqf/$method")
-        args("zest", "ch.fmartin.SiusDataToPostgresAdapterFuzzTest", method, outputDir.get().asFile.absolutePath)
+        args(
+            "--output",
+            outputDir.get().asFile.absolutePath,
+            "ch.fmartin",
+            "ch.fmartin.SiusDataToPostgresAdapterFuzzTest",
+            method
+        )
         outputs.dir(outputDir)
         jvmArgs(
             "--add-opens", "java.base/java.lang=ALL-UNNAMED",
@@ -153,8 +159,7 @@ val jqfFuzzTasks = jqfTargets.map { method ->
             if (System.getenv("JQF_ZEST_MAX_TIME").isNullOrBlank()) {
                 environment("JQF_ZEST_MAX_TIME", "300s")
             }
-            val agent = (configurations.named("fuzzTestRuntimeOnly").get().resolve() +
-                configurations.named("fuzzTestImplementation").get().resolve())
+            val agent = configurations.named("fuzzTestRuntimeClasspath").get().resolve()
                 .firstOrNull { it.name.startsWith("jqf-instrument") && it.extension == "jar" }
             if (agent != null) {
                 jvmArgs("-javaagent:${agent.absolutePath}")
