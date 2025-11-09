@@ -376,7 +376,7 @@ public class SiusDataToPostgresAdapterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"12345678.csv", "87654321_data.csv", "12345678.CSV", "all.csv", "ALL.CSV"})
+    @ValueSource(strings = {"12345678.csv", "87654321_data.csv", "12345678.CSV", "20240101_all.csv", "20240101_ALL.CSV"})
     void testIsValidCsvFile_Valid(String fileName) {
         // when
         boolean result = adapter.isValidCsvFile(fileName);

@@ -495,9 +495,9 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 Path.of("src/test/resources/stresstest/individual").toAbsolutePath(),
                 stressWorkDir);
 
-        assertFalse(fixtures.expectedLineCounts().isEmpty(), "Expected stresstest fixtures without all.csv");
+        assertFalse(fixtures.expectedLineCounts().isEmpty(), "Expected stresstest fixtures without aggregated CSV");
         assertFalse(fixtures.ignoredFileNames().isEmpty(), "Sidecar fixtures should be present to verify they are ignored");
-        assertFalse(fixtures.expectedLineCounts().containsKey("all.csv"), "all.csv should not be included in the individual fixtures");
+        assertFalse(fixtures.expectedLineCounts().containsKey("20240101_all.csv"), "Aggregated CSV should not be included in the individual fixtures");
 
         SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", stressWorkDir.toAbsolutePath().toString())
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
@@ -532,9 +532,9 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 Path.of("src/test/resources/stresstest/all").toAbsolutePath(),
                 stressWorkDir);
 
-        assertEquals(1, fixtures.expectedLineCounts().size(), "Expected exactly one CSV file when copying all.csv");
-        assertTrue(fixtures.expectedLineCounts().containsKey("all.csv"), "all.csv should be present in the copied fixtures");
-        assertTrue(fixtures.ignoredFileNames().isEmpty(), "The all.csv fixture set should not include sidecar files");
+        assertEquals(1, fixtures.expectedLineCounts().size(), "Expected exactly one CSV file when copying the aggregated export");
+        assertTrue(fixtures.expectedLineCounts().containsKey("20240101_all.csv"), "Aggregated CSV should be present in the copied fixtures");
+        assertTrue(fixtures.ignoredFileNames().isEmpty(), "The aggregated fixture set should not include sidecar files");
 
         SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", stressWorkDir.toAbsolutePath().toString())
                 .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())

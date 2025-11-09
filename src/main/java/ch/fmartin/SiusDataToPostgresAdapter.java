@@ -540,11 +540,6 @@ public class SiusDataToPostgresAdapter {
             return false;
         }
 
-        // Allow SIUS "all.csv" aggregate exports
-        if ("all.csv".equals(lower)) {
-            return true;
-        }
-
         return CSV_FILE_PATTERN.matcher(fileName).matches();
     }
 
