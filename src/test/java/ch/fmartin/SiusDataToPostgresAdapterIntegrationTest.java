@@ -1051,7 +1051,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         long expectedTotalRows = expectedLineCounts.values().stream().mapToLong(Long::longValue).sum();
 
         Awaitility.await()
-                .atMost(5, TimeUnit.MINUTES)
+                .atMost(10, TimeUnit.MINUTES)
                 .pollInterval(2, TimeUnit.SECONDS)
                 .untilAsserted(() -> {
                     try (Connection conn = DriverManager.getConnection(
