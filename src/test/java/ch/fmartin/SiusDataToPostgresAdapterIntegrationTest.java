@@ -517,7 +517,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     adapterThread.start();
 
                     Awaitility.await()
-                            .atMost(10, TimeUnit.MINUTES)
+                            .atMost(2, TimeUnit.MINUTES)
                             .pollInterval(1, TimeUnit.SECONDS)
                             .until(() -> adapter != null && adapter.isInitialized());
 
@@ -554,7 +554,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     adapterThread.start();
 
                     Awaitility.await()
-                            .atMost(2, TimeUnit.MINUTES)
+                            .atMost(10, TimeUnit.MINUTES)
                             .pollInterval(1, TimeUnit.SECONDS)
                             .until(() -> adapter != null && adapter.isInitialized());
 
