@@ -8,6 +8,7 @@ import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.ToxiproxyContainer;
@@ -30,14 +31,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public class SiusDataToPostgresAdapterIntegrationTest {
+
+    private static final AtomicBoolean DOCKER_CHECKED = new AtomicBoolean(false);
+    private static volatile boolean dockerAvailable;
+    private static volatile String dockerUnavailableMessage;
 
     private PostgreSQLContainer<?> postgreSQLContainer;
     private Path tempDir;
@@ -50,6 +57,8 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @BeforeEach
     public void setUp() throws Exception {
+        assumeDockerAvailable();
+
         network = Network.newNetwork();
 
         postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
@@ -75,6 +84,33 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         tempDir = Files.createTempDirectory("siusdata_test");
     }
 
+    private static void assumeDockerAvailable() {
+        if (!DOCKER_CHECKED.get()) {
+            synchronized (SiusDataToPostgresAdapterIntegrationTest.class) {
+                if (!DOCKER_CHECKED.get()) {
+                    try {
+                        DockerClientFactory.instance().client();
+                        dockerAvailable = true;
+                    } catch (Throwable throwable) {
+                        String diagnostic = throwable.getMessage();
+                        if (diagnostic == null || diagnostic.isBlank()) {
+                            diagnostic = throwable.getClass().getName();
+                        }
+                        dockerUnavailableMessage = String.format(
+                                Locale.ROOT,
+                                "Docker is required to run Testcontainers-based integration tests but is unavailable: %s",
+                                diagnostic);
+                        dockerAvailable = false;
+                    } finally {
+                        DOCKER_CHECKED.set(true);
+                    }
+                }
+            }
+        }
+
+        assumeTrue(dockerAvailable, dockerUnavailableMessage);
+    }
+
     @AfterEach
     public void tearDown() throws Exception {
         // Shutdown the adapter
@@ -87,13 +123,19 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         }
 
         // Delete temporary directory and files
-        Files.walk(tempDir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete);
+        if (tempDir != null) {
+            Files.walk(tempDir)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+        }
 
-        postgreSQLContainer.stop();
-        toxiproxy.stop();
+        if (postgreSQLContainer != null) {
+            postgreSQLContainer.stop();
+        }
+        if (toxiproxy != null) {
+            toxiproxy.stop();
+        }
     }
 
     @Test
