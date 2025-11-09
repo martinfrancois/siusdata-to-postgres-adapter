@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -532,15 +533,19 @@ public class SiusDataToPostgresAdapter {
      * @return True if it matches, false otherwise.
      */
     boolean isValidCsvFile(String fileName) {
-        if (!CSV_FILE_PATTERN.matcher(fileName).matches()) {
-            return false;
-        }
-        String lower = fileName.toLowerCase();
+        String lower = fileName.toLowerCase(Locale.ROOT);
+
         // Explicitly exclude SIUS sidecar files
         if (lower.endsWith("_stl.csv") || lower.endsWith("_mod.csv")) {
             return false;
         }
-        return true;
+
+        // Allow SIUS "all.csv" aggregate exports
+        if ("all.csv".equals(lower)) {
+            return true;
+        }
+
+        return CSV_FILE_PATTERN.matcher(fileName).matches();
     }
 
     /**
