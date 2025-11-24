@@ -1,5 +1,8 @@
 name: Build
 
+permissions:
+  contents: read
+
 on:
   push:
 
@@ -13,6 +16,9 @@ jobs:
   release:
     if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
@@ -70,6 +76,9 @@ jobs:
   build:
     if: github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout repository
