@@ -3,7 +3,7 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
-    id("org.openrewrite.rewrite") version "7.25.0"
+    id("org.openrewrite.rewrite") version "7.26.0"
     id("com.gradleup.shadow") version "9.3.1"
     id("org.graalvm.buildtools.native") version "0.11.4"
     id("application")
