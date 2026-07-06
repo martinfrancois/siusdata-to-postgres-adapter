@@ -28,7 +28,7 @@ dependencies {
     implementation("com.google.guava:guava:33.6.0-jre")
 
     // DB connection
-    implementation("org.postgresql:postgresql:42.7.12")  // PostgreSQL JDBC Driver
+    implementation("org.postgresql:postgresql:42.7.13")  // PostgreSQL JDBC Driver
     implementation("com.zaxxer:HikariCP:7.1.0")
 
     // Logging
