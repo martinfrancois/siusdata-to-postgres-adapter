@@ -56,7 +56,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
-    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.39.0")
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.40.0")
 }
 
 tasks.test {
