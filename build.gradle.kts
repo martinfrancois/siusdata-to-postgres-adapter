@@ -5,7 +5,7 @@ plugins {
     id("java")
     id("org.openrewrite.rewrite") version "7.37.0"
     id("com.gradleup.shadow") version "9.6.1"
-    id("org.graalvm.buildtools.native") version "0.11.5"
+    id("org.graalvm.buildtools.native") version "1.1.6"
     id("application")
 }
 
