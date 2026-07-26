@@ -11,9 +11,18 @@
   "packageRules": [
     {
       "matchUpdateTypes": [
-        "minor", "patch", "pin", "digest"
+        "minor",
+        "patch",
+        "pin",
+        "digest"
       ],
       "automerge": true
+    },
+    {
+      "groupName": "all remaining dependencies",
+      "matchPackageNames": [
+        "/.*/"
+      ]
     },
     {
       "groupName": "Testing",
