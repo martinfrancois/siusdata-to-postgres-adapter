@@ -3,6 +3,12 @@ name: Build
 on:
   push:
 
+# Only the newest commit on a branch needs a complete build. This is especially
+# important on master, where every completed run creates a Windows release.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     if: github.ref == 'refs/heads/master'
