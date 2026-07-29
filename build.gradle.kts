@@ -33,7 +33,7 @@ dependencies {
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.18")
-    implementation("ch.qos.logback:logback-classic:1.6.0")
+    implementation("ch.qos.logback:logback-classic:1.6.1")
 
     // CSV Parsing
     implementation("de.siegmar:fastcsv:4.4.0")
