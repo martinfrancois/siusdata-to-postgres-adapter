@@ -3,7 +3,7 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
-    id("org.openrewrite.rewrite") version "7.37.0"
+    id("org.openrewrite.rewrite") version "7.38.0"
     id("com.gradleup.shadow") version "9.6.1"
     id("org.graalvm.buildtools.native") version "1.1.6"
     id("application")
@@ -36,7 +36,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.6.0")
 
     // CSV Parsing
-    implementation("de.siegmar:fastcsv:4.3.1")
+    implementation("de.siegmar:fastcsv:4.4.0")
 
     // JSON Handling
     implementation("org.json:json:20250517")
@@ -56,7 +56,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
-    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.40.0")
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.41.0")
 }
 
 tasks.test {
