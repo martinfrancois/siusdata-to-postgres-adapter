@@ -96,5 +96,18 @@ jobs:
       - name: Run unit tests
         run: ./gradlew test --scan
 
+      - name: Run fuzz tests
+        run: ./gradlew jqfFuzz --scan
+        env:
+          JQF_ZEST_MAX_TIME: 300s
+
+      - name: Upload fuzzing artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jqf-artifacts
+          path: build/jqf
+          if-no-files-found: ignore
+
       - name: Build with Gradle
         run: ./gradlew build --scan

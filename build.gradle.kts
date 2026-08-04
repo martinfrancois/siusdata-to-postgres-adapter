@@ -1,3 +1,6 @@
+import org.gradle.api.tasks.JavaExec
+import java.util.Locale
+
 group = "ch.fmartin"
 version = "1.0-SNAPSHOT"
 
@@ -21,6 +24,29 @@ application {
 
 repositories {
     mavenCentral()
+}
+
+val jqfVersion = "2.1"
+
+sourceSets {
+    val fuzzTest by creating {
+        java.setSrcDirs(listOf("src/fuzzTest/java"))
+        resources.setSrcDirs(listOf("src/fuzzTest/resources"))
+        compileClasspath += sourceSets.main.get().output
+        compileClasspath += sourceSets.main.get().compileClasspath
+        runtimeClasspath += output
+        runtimeClasspath += compileClasspath
+        runtimeClasspath += sourceSets.main.get().runtimeClasspath
+    }
+}
+
+configurations {
+    named("fuzzTestImplementation") {
+        extendsFrom(getByName("testImplementation"))
+    }
+    named("fuzzTestRuntimeOnly") {
+        extendsFrom(getByName("testRuntimeOnly"))
+    }
 }
 
 dependencies {
@@ -54,6 +80,14 @@ dependencies {
     testImplementation("net.jqwik:jqwik:1.10.1")
     testRuntimeOnly("net.jqwik:jqwik-engine:1.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // Fuzz testing
+    add("fuzzTestImplementation", "edu.berkeley.cs.jqf:jqf-fuzz:$jqfVersion")
+    add("fuzzTestImplementation", "edu.berkeley.cs.jqf:jqf-instrument:$jqfVersion")
+    add("fuzzTestImplementation", "edu.berkeley.cs.jqf:jqf-zest:$jqfVersion")
+    add("fuzzTestImplementation", "junit:junit:4.13.2")
+    add("fuzzTestImplementation", "com.pholser:junit-quickcheck-core:1.0")
+    add("fuzzTestImplementation", "com.pholser:junit-quickcheck-generators:1.0")
 
     // OpenRewrite
     rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.41.0")
@@ -105,4 +139,60 @@ tasks.shadowJar {
 
 rewrite {
     activeRecipe("org.openrewrite.java.migrate.UpgradeToJava21")
+}
+
+configurations.all {
+    resolutionStrategy.dependencySubstitution {
+        // JQF 2.1 does not publish a dedicated jqf-zest artifact; reuse jqf-fuzz until upstream ships one.
+        substitute(module("edu.berkeley.cs.jqf:jqf-zest")).using(module("edu.berkeley.cs.jqf:jqf-fuzz:$jqfVersion"))
+    }
+}
+
+val jqfTargets = listOf(
+    "fuzzIsValidCsvFile",
+    "fuzzCalculateTimestamp",
+    "fuzzSetIntegerField",
+    "fuzzSetLongField",
+    "fuzzSetBooleanField",
+    "fuzzSetTextField"
+)
+
+val jqfFuzzTasks = jqfTargets.map { method ->
+    val taskName = "jqf" + method.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+    tasks.register<JavaExec>(taskName) {
+        group = "verification"
+        description = "Run JQF Zest on $method"
+        val fuzz = sourceSets.named("fuzzTest").get()
+        classpath = fuzz.runtimeClasspath
+        mainClass.set("edu.berkeley.cs.jqf.fuzz.Launch")
+        val outputDir = layout.buildDirectory.dir("jqf/$method")
+        args(
+            "--output",
+            outputDir.get().asFile.absolutePath,
+            "ch.fmartin",
+            "ch.fmartin.SiusDataToPostgresAdapterFuzzTest",
+            method
+        )
+        outputs.dir(outputDir)
+        jvmArgs(
+            "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+            "--add-opens", "java.base/java.util=ALL-UNNAMED"
+        )
+        doFirst {
+            if (System.getenv("JQF_ZEST_MAX_TIME").isNullOrBlank()) {
+                environment("JQF_ZEST_MAX_TIME", "300s")
+            }
+            val agent = configurations.named("fuzzTestRuntimeClasspath").get().resolve()
+                .firstOrNull { it.name.startsWith("jqf-instrument") && it.extension == "jar" }
+            if (agent != null) {
+                jvmArgs("-javaagent:${agent.absolutePath}")
+            }
+        }
+    }
+}
+
+tasks.register("jqfFuzz") {
+    group = "verification"
+    description = "Run all JQF fuzz targets"
+    dependsOn(jqfFuzzTasks)
 }
