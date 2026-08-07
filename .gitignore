@@ -42,6 +42,10 @@ bin/
 .DS_Store
 
 *.csv
+# ... but the CSV test fixtures are source, not sample data. Without this
+# negation a newly added fixture is silently untracked and the suite passes
+# locally while failing in CI.
+!src/test/resources/**/*.csv
 /logs
 /.idea
 .jqwik-database/
