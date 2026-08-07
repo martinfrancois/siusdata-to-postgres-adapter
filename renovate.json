@@ -1,38 +1,92 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":rebaseStalePrs"
   ],
-  "reviewers": [
-    "martinfrancois"
-  ],
+  "reviewers": ["martinfrancois"],
+  "labels": ["dependencies"],
   "rangeStrategy": "replace",
-  "separateMinorPatch": true,
+  "pinDigests": true,
+  "prConcurrentLimit": 0,
+  "branchConcurrentLimit": 0,
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
+  "statusCheckWhen": {
+    "minimumReleaseAge": "never"
+  },
+  "dependencyDashboardApproval": false,
+  "separateMajorMinor": true,
+  "separateMultipleMajor": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Container image tags hard-coded in Testcontainers Java sources. No built-in manager reads .java files, so postgres:15.3 and ghcr.io/shopify/toxiproxy:2.10.0 would otherwise never be updated. Both alternatives are anchored on a Testcontainers construct so that unrelated colon-bearing literals in these files (\"postgres:5432\", \"0.0.0.0:8666\", \"jdbc:postgresql://...\", CSV timestamps like 17:31:31.00) cannot match. The optional currentDigest group keeps the manager matching after pinDigests rewrites the literal to name:tag@sha256:...",
+      "managerFilePatterns": ["/^src/test/java/.+\\.java$/"],
+      "matchStrings": [
+        "DockerImageName\\.parse\\(\\s*\"(?<depName>[^\"\\s:@]+):(?<currentValue>[\\w][\\w.\\-]*)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\"\\s*\\)",
+        "new\\s+\\w*Container(?:<[^>]*>)?\\(\\s*\"(?<depName>[^\"\\s:@]+):(?<currentValue>[\\w][\\w.\\-]*)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\"\\s*\\)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "pin",
-        "digest"
+      "description": "Bundle every non-major update into one automergeable pull request. Majors are deliberately excluded so a pending major never blocks the automergeable bundle.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-non-major",
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "description": "Major updates land one at a time and are merged by a human after review of the migration notes. This rule deliberately does not set groupName: majors are already ungrouped because the bundle above matches non-major types only, and forcing groupName here would split lockstep groups whose members must move together across a major boundary.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["major update"]
+    },
+    {
+      "description": "Lockstep: every org.testcontainers artifact ships from one repository under one version number, and the modules resolve the core at their own version. `gradlew dependencies --configuration testRuntimeClasspath` currently reports `org.testcontainers:junit-jupiter:1.21.4 -> org.testcontainers:testcontainers:1.21.4 -> 2.0.5` for junit-jupiter, postgresql and toxiproxy, i.e. core has already crossed a major alone and Gradle is silently forcing three modules onto an unintended core. A shared groupName makes the next major boundary a single reviewed pull request instead of four.",
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["/^org\\.testcontainers:/"],
+      "groupName": "testcontainers"
+    },
+    {
+      "description": "Lockstep: junit-bom pins the versions that junit-jupiter and junit-platform-launcher resolve to. The build declares platform(org.junit:junit-bom) plus two versionless artifacts, so the BOM major and any artifact major must be the same pull request.",
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["/^org\\.junit(\\.[^:]+)?:/"],
+      "groupName": "junit"
+    },
+    {
+      "description": "Lockstep: net.jqwik:jqwik depends on net.jqwik:jqwik-engine at its exact version (verified in the resolved testRuntimeClasspath tree), and both are declared separately here (jqwik as testImplementation, jqwik-engine as testRuntimeOnly). Split majors would put jqwik-api and the JUnit platform engine implementation on different versions and the jqwik engine would fail to register.",
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["/^net\\.jqwik:/"],
+      "groupName": "jqwik"
+    },
+    {
+      "description": "Lockstep: the org.openrewrite.rewrite Gradle plugin and the recipe artifact on the `rewrite` configuration must agree on rewrite-core. `gradlew buildEnvironment` shows plugin 7.38.0 -> org.openrewrite:plugin:7.38.0 -> org.openrewrite:rewrite-bom:8.88.0, and rewrite-migrate-java:3.41.0 pulls org.openrewrite:rewrite-java:8.88.0. A recipe compiled against a newer rewrite-core than the plugin loads fails at recipe-run time, not at configuration time.",
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": [
+        "/^org\\.openrewrite(\\.[^:]+)?(:|$)/",
+        "/^org\\.openrewrite\\.rewrite$/"
       ],
-      "automerge": true
+      "groupName": "openrewrite"
     },
     {
-      "groupName": "all remaining dependencies",
+      "description": "Lockstep: the org.graalvm.buildtools.native plugin only ever runs in the release job against the GraalVM that graalvm/setup-graalvm installs, and a plugin major that raises its minimum GraalVM has to land together with the action that provides it. Note the actual GraalVM version is selected by `java-version: '21'` in the workflow, which no manager covers today.",
+      "matchUpdateTypes": ["major"],
       "matchPackageNames": [
-        "/.*/"
-      ]
-    },
-    {
-      "groupName": "Testing",
-      "matchPackageNames": [
-        "org.mockito{/,}**",
-        "org.junit{/,}**",
-        "org.testcontainers{/,}**",
-        "com.github.stefanbirkner{/,}**",
-        "org.awaitility{/,}**"
-      ]
+        "/^org\\.graalvm\\./",
+        "/^graalvm\\/setup-graalvm$/"
+      ],
+      "groupName": "graalvm"
     }
   ]
 }
