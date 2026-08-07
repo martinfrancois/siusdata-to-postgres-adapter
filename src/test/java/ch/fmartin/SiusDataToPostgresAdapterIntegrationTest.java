@@ -44,7 +44,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     public void setUp() throws Exception {
         network = Network.newNetwork();
 
-        postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.3"))
+        postgreSQLContainer = new PostgreSQLContainer<>(DockerImageName.parse("postgres:15.17"))
                 .withDatabaseName("test")
                 .withUsername("test")
                 .withPassword("test")
