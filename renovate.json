@@ -122,5 +122,12 @@
       ],
       "groupName": "graalvm"
     }
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__fixtures__/**"
   ]
 }
