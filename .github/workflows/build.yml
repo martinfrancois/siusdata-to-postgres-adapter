@@ -7,14 +7,14 @@ on:
   push:
 
 # Only the newest commit on a branch needs a complete build. This is especially
-# important on master, where every completed run creates a Windows release.
+# important on main, where every completed run creates a Windows release.
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -74,7 +74,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    if: github.ref != 'refs/heads/master'
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
