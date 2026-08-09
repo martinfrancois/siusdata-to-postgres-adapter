@@ -11,6 +11,7 @@
   "labels": [
     "dependencies"
   ],
+  "platformAutomerge": false,
   "rangeStrategy": "pin",
   "pinDigests": true,
   "prConcurrentLimit": 0,
