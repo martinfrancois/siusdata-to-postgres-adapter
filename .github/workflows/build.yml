@@ -98,3 +98,77 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build --scan
+
+  windows-native:
+    if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@0def53c0fd8534bc13416c9469f5be45265824fd # v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Gradle without branch-writable caches
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-disabled: true
+
+      - name: Build Windows JAR and native image
+        shell: pwsh
+        run: .\gradlew.bat shadowJar nativeCompile --no-daemon
+
+      - name: Verify and package Windows artifacts
+        id: artifact
+        shell: pwsh
+        run: |
+          $output = 'build/native/nativeCompile'
+          $executables = @(Get-ChildItem -LiteralPath $output -Filter 'siusdata-to-postgres-adapter*.exe' -File)
+          if ($executables.Count -ne 1) {
+            throw "Expected exactly one native executable, found $($executables.Count)"
+          }
+          if ($executables[0].Length -le 0) {
+            throw 'Native executable is empty'
+          }
+          $dlls = @(Get-ChildItem -LiteralPath $output -Filter '*.dll' -File)
+          $archive = Join-Path $output 'siusdata-to-postgres-adapter-native-executable.zip'
+          $inputs = @($executables.FullName) + @($dlls | ForEach-Object { $_.FullName })
+          Compress-Archive -LiteralPath $inputs -DestinationPath $archive
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw 'Native artifact archive was not created'
+          }
+          $entries = @(tar -tf $archive)
+          $expected = @($inputs | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+          $actual = @($entries | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+          if ($LASTEXITCODE -ne 0 -or (Compare-Object $expected $actual)) {
+            throw 'Native artifact archive does not exactly match the built executable and DLL set'
+          }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          @(
+            '### Windows native artifact'
+            ''
+            'Commit: ${{ github.sha }}'
+            ''
+            "SHA-256: $digest"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload exact-head Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-native-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 7
