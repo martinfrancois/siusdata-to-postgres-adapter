@@ -5,7 +5,7 @@ plugins {
     id("java")
     id("org.openrewrite.rewrite") version "7.38.0"
     id("com.gradleup.shadow") version "9.6.1"
-    id("org.graalvm.buildtools.native") version "1.1.7"
+    id("org.graalvm.buildtools.native") version "1.1.8"
     id("application")
 }
 
@@ -42,7 +42,7 @@ dependencies {
     implementation("org.json:json:20250517")
 
     // Testing
-    testImplementation(platform("org.junit:junit-bom:6.1.2"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.mockito:mockito-junit-jupiter:5.23.0")
     testImplementation("org.testcontainers:testcontainers:2.0.5")
