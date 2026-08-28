@@ -5,7 +5,7 @@ plugins {
     id("java")
     id("org.openrewrite.rewrite") version "7.39.0"
     id("com.gradleup.shadow") version "9.6.1"
-    id("org.graalvm.buildtools.native") version "1.1.9"
+    id("org.graalvm.buildtools.native") version "1.1.10"
     id("application")
 }
 
@@ -25,7 +25,7 @@ repositories {
 
 dependencies {
     // Utilities
-    implementation("com.google.guava:guava:33.6.0-jre")
+    implementation("com.google.guava:guava:33.7.1-jre")
 
     // DB connection
     implementation("org.postgresql:postgresql:42.7.13")  // PostgreSQL JDBC Driver
@@ -56,7 +56,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // OpenRewrite
-    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.42.0")
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java:3.42.1")
 }
 
 tasks.test {
