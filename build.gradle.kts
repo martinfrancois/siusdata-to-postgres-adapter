@@ -3,9 +3,9 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
-    id("org.openrewrite.rewrite") version "7.39.0"
+    id("org.openrewrite.rewrite") version "7.41.0"
     id("com.gradleup.shadow") version "9.6.1"
-    id("org.graalvm.buildtools.native") version "1.1.11"
+    id("org.graalvm.buildtools.native") version "1.1.12"
     id("application")
 }
 
@@ -32,7 +32,7 @@ dependencies {
     implementation("com.zaxxer:HikariCP:7.1.0")
 
     // Logging
-    implementation("org.slf4j:slf4j-api:2.0.18")
+    implementation("org.slf4j:slf4j-api:2.0.19")
     implementation("ch.qos.logback:logback-classic:1.6.3")
 
     // CSV Parsing
