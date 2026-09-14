@@ -51,6 +51,16 @@
   ],
   "packageRules": [
     {
+      "description": "Exclude OpenRewrite Gradle plugin 7.40.0 and 7.41.0 because their public Plugin Portal publications depend on org.openrewrite BOM artifacts that are available only from the credentialed Code Genome Project. Later versions remain eligible when publicly resolvable.",
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "org.openrewrite.rewrite"
+      ],
+      "allowedVersions": "!/^(?:7\\.40\\.0|7\\.41\\.0)$/"
+    },
+    {
       "description": "Bundle every non-major update into one automergeable pull request. Majors are deliberately excluded so a pending major never blocks the automergeable bundle.",
       "matchUpdateTypes": [
         "minor",
