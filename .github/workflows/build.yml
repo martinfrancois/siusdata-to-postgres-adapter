@@ -105,6 +105,61 @@ jobs:
         shell: pwsh
         run: .\gradlew.bat shadowJar nativeCompile --no-daemon
 
+      # Building the executable proves nothing about whether it runs: GraalVM
+      # reflection gaps only show at runtime. windows-latest ships PostgreSQL as
+      # a stopped service (user postgres, password root, PGBIN set), so the
+      # executable is started against it and must import the fixture file.
+      - name: Run the native executable against PostgreSQL
+        shell: pwsh
+        env:
+          PGPASSWORD: root
+        run: |
+          $service = Get-Service -Name 'postgresql*' | Select-Object -First 1
+          if (-not $service) { throw 'No PostgreSQL service on this runner' }
+          Set-Service -Name $service.Name -StartupType Manual
+          Start-Service -Name $service.Name
+          $psql = Join-Path $env:PGBIN 'psql.exe'
+          $created = $false
+          foreach ($attempt in 1..15) {
+            & $psql -U postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 -c 'CREATE DATABASE siusdata'
+            if ($LASTEXITCODE -eq 0) { $created = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $created) { throw 'Could not create the database' }
+
+          $fixture = 'src/test/resources/reproduction/20250928.csv'
+          $expected = @(Get-Content $fixture | Where-Object { $_.Trim() -ne '' }).Count
+          $csvDir = Join-Path $env:RUNNER_TEMP 'incoming'
+          New-Item -ItemType Directory -Force -Path $csvDir | Out-Null
+          Copy-Item $fixture $csvDir
+          $exe = @(Get-ChildItem -LiteralPath 'build/native/nativeCompile' -Filter 'siusdata-to-postgres-adapter*.exe' -File)[0].FullName
+
+          $env:CSV_MONITOR_PATH = $csvDir
+          $env:POSTGRESQL_URL = 'jdbc:postgresql://127.0.0.1:5432/siusdata'
+          $env:POSTGRESQL_USER = 'postgres'
+          $env:POSTGRESQL_PASSWORD = 'root'
+          $stdout = Join-Path $env:RUNNER_TEMP 'native-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'native-stderr.txt'
+          $process = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+
+          $rows = -1
+          foreach ($attempt in 1..60) {
+            Start-Sleep -Seconds 2
+            if ($process.HasExited) { break }
+            $count = & $psql -U postgres -h 127.0.0.1 -d siusdata -t -A -c 'SELECT count(*) FROM siusdata_shots' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $count) {
+              $rows = [int]$count.Trim()
+              if ($rows -eq $expected) { break }
+            }
+          }
+          $exited = $process.HasExited
+          if (-not $exited) { Stop-Process -Id $process.Id -Force }
+          Write-Host '--- executable output'
+          Get-Content $stdout, $stderr
+          if ($exited) { throw "The executable exited with code $($process.ExitCode) instead of watching the folder" }
+          if ($rows -ne $expected) { throw "Expected $expected rows in siusdata_shots, found $rows" }
+          Write-Host "The native executable imported $rows shots"
+
       - name: Verify and package Windows artifacts
         id: artifact
         shell: pwsh
