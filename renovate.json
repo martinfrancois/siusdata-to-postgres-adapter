@@ -123,7 +123,7 @@
       "groupName": "graalvm"
     },
     {
-      "description": "The two GraalVM steps in build.yml install Oracle GraalVM, which publishes graalvm-jdk-21.0.12 and no build-number suffix, while Renovate reads java-version with the Adoptium datasource and proposes Adoptium release names like 21.0.12+8.0.LTS. That filename does not exist on any platform, so the pin it offered broke the windows-native job. Renovate has no datasource for Oracle GraalVM, so it does not manage these two lines; they are pinned by hand and checked by the release and windows-native jobs. The setup-java step in ci.yml is Temurin and stays managed.",
+      "description": "The two GraalVM steps in build.yml install Oracle GraalVM, which publishes graalvm-jdk-25.0.4 and no build-number suffix, while Renovate reads java-version with the Adoptium datasource and proposes Adoptium release names like 25.0.4+8.0.LTS. That filename does not exist on any platform, so the pin it offered broke the windows-native job. Renovate has no datasource for Oracle GraalVM, so it does not manage these two lines; they are pinned by hand and checked by the release and windows-native jobs. The setup-java step in ci.yml is Temurin and stays managed.",
       "matchManagers": [
         "github-actions"
       ],
