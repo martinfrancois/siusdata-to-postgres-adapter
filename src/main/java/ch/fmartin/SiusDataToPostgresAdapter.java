@@ -510,7 +510,9 @@ public class SiusDataToPostgresAdapter {
                         continue;
                     }
 
-                    // Context for directory entry event is the file name of entry
+                    // The directory was registered as a Path, so the context of a create or modify event
+                    // is the entry's Path.
+                    @SuppressWarnings("unchecked")
                     WatchEvent<Path> ev = (WatchEvent<Path>) event;
                     String fileName = ev.context().toString();
                     Path filePath = Path.of(directoryToWatch).resolve(fileName);

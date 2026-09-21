@@ -9,8 +9,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.ToxiproxyContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.toxiproxy.ToxiproxyContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 public class SiusDataToPostgresAdapterIntegrationTest {
 
-    private PostgreSQLContainer<?> postgreSQLContainer;
+    private PostgreSQLContainer postgreSQLContainer;
     private Path tempDir;
     private SiusDataToPostgresAdapter adapter;
     private Thread adapterThread;
@@ -50,7 +50,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     public void setUp() throws Exception {
         network = Network.newNetwork();
 
-        postgreSQLContainer = new PostgreSQLContainer<>(TestImages.POSTGRES)
+        postgreSQLContainer = new PostgreSQLContainer(TestImages.POSTGRES)
                 .withDatabaseName("test")
                 .withUsername("test")
                 .withPassword("test")

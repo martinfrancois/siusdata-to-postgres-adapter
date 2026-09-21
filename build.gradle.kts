@@ -64,9 +64,12 @@ tasks.test {
         includeEngines("junit-jupiter", "jqwik")
     }
     // fix for: "Unable to make field private final java.util.Map java.util.Collections$UnmodifiableMap.m accessible: module java.base does not "opens java.util" to unnamed module"
+    // --enable-native-access: Testcontainers reaches the container engine through docker-java, which
+    // loads JNA, and the JVM allows that native call only when it is granted here.
     jvmArgs = listOf(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED"
+        "--add-opens", "java.base/java.util=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED"
     )
 
     val skipIntegrationTests = providers.provider {
