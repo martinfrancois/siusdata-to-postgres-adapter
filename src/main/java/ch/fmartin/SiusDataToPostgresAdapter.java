@@ -906,7 +906,7 @@ public class SiusDataToPostgresAdapter {
     Timestamp calculateTimestamp(String dateValue, String fileName) {
         try {
             long intervals = Long.parseLong(dateValue.trim());
-            long millisecondsToAdd = intervals * 10;
+            long millisecondsToAdd = Math.multiplyExact(intervals, 10L);
 
             // Extract year from filename (first four digits)
             if (fileName.length() < 4) {
@@ -922,9 +922,16 @@ public class SiusDataToPostgresAdapter {
             // Add the milliseconds
             Instant calculatedInstant = startOfYearInstant.plusMillis(millisecondsToAdd);
 
+            // This guard is for malformed input only. Field 23 counts hundredths of a second since
+            // 1 January of the file's year, so a real export stays far inside long and Instant. Only
+            // garbage input can reach the overflow that Timestamp.from would hit, because Timestamp
+            // keeps epoch milliseconds in a long. Such a row gets NULL and a log line instead of a
+            // wrong date or an exception that would send the file into the retry loop.
+            Math.multiplyExact(calculatedInstant.getEpochSecond(), 1000L);
+
             // Convert to Timestamp
             return Timestamp.from(calculatedInstant);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | ArithmeticException e) {
             logError("Invalid Date value '" + dateValue + "': " + e.getMessage(), e);
             return null;
         }
