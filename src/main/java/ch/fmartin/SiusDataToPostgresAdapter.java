@@ -49,6 +49,10 @@ public class SiusDataToPostgresAdapter {
 
     private static final int DEFAULT_GOTIFY_PRIORITY = 5;
 
+    // Pushbullet has one fixed endpoint. Tests point this at a local stub server.
+    static final String PUSHBULLET_ENDPOINT = "https://api.pushbullet.com/v2/pushes";
+    private String pushbulletEndpoint = PUSHBULLET_ENDPOINT;
+
     // Dependencies
     private final Logger logger;
     private final ExecutorService executorService;
@@ -359,7 +363,7 @@ public class SiusDataToPostgresAdapter {
 
         HttpURLConnection conn = null;
         try {
-            URL url = URI.create("https://api.pushbullet.com/v2/pushes").toURL();
+            URL url = URI.create(pushbulletEndpoint).toURL();
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Access-Token", pushbulletApiKey);
@@ -465,6 +469,10 @@ public class SiusDataToPostgresAdapter {
                 conn.disconnect();
             }
         }
+    }
+
+    void setPushbulletEndpoint(String pushbulletEndpoint) {
+        this.pushbulletEndpoint = pushbulletEndpoint;
     }
 
     void sendNotifications(String title, String message) {
