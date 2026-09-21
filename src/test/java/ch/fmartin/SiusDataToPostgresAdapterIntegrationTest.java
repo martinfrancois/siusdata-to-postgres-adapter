@@ -23,11 +23,17 @@ import java.sql.ResultSet;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 public class SiusDataToPostgresAdapterIntegrationTest {
 
@@ -876,6 +882,113 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                         return false;
                     }
                 });
+    }
+
+    /**
+     * Every individual SIUSData export in src/test/resources/stresstest/individual, 20 result files
+     * with 25385 shots plus the sidecar files, goes through the real parser and the real database.
+     * Each result file must end up with one row per line and a file_progress entry that says so;
+     * the sidecar files must leave no trace.
+     */
+    @Test
+    public void testStressTestIndividualExports() throws Exception {
+        Path exports = Files.createDirectory(tempDir.resolve("individual"));
+        Map<String, Long> expectedLines = copyExports(Path.of("src/test/resources/stresstest/individual"), exports);
+        List<String> sidecars = expectedLines.keySet().stream().filter(name -> !adapterAccepts(name)).toList();
+        sidecars.forEach(expectedLines::remove);
+        assertEquals(20, expectedLines.size(), "result files in the fixture folder");
+        assertEquals(10, sidecars.size(), "sidecar files in the fixture folder");
+
+        runAdapterUntilInitialized(exports, 10, TimeUnit.MINUTES);
+
+        assertIngested(expectedLines, sidecars);
+    }
+
+    /**
+     * The aggregated export puts the individual exports into one file of 25386 shots. Ingesting it in
+     * one go checks the single-transaction path of processFile with a real-size input.
+     */
+    @Test
+    public void testStressTestAggregatedExport() throws Exception {
+        Path exports = Files.createDirectory(tempDir.resolve("all"));
+        Map<String, Long> expectedLines = copyExports(Path.of("src/test/resources/stresstest/all"), exports);
+        assertEquals(Map.of("20240101_all.csv", 25386L), expectedLines);
+
+        runAdapterUntilInitialized(exports, 10, TimeUnit.MINUTES);
+
+        assertIngested(expectedLines, List.of());
+    }
+
+    private static boolean adapterAccepts(String fileName) {
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        return !(lower.endsWith("_stl.csv") || lower.endsWith("_mod.csv"));
+    }
+
+    /** Copies every CSV file and returns the non-blank line count per file name. */
+    private static Map<String, Long> copyExports(Path source, Path target) throws Exception {
+        Map<String, Long> lines = new LinkedHashMap<>();
+        try (Stream<Path> files = Files.list(source)) {
+            for (Path file : files.filter(Files::isRegularFile).sorted().toList()) {
+                Files.copy(file, target.resolve(file.getFileName()));
+                try (Stream<String> content = Files.lines(file)) {
+                    lines.put(file.getFileName().toString(), content.filter(line -> !line.isBlank()).count());
+                }
+            }
+        }
+        return lines;
+    }
+
+    private void runAdapterUntilInitialized(Path csvDirectory, long timeout, TimeUnit unit) throws Exception {
+        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", csvDirectory.toAbsolutePath().toString())
+                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
+                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
+                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
+                .and("PUSHBULLET_API_KEY", "")
+                .execute(() -> {
+                    adapterThread = new Thread(() -> {
+                        try {
+                            adapter = new SiusDataToPostgresAdapter();
+                            adapter.start();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    adapterThread.setDaemon(true);
+                    adapterThread.start();
+
+                    Awaitility.await()
+                            .atMost(timeout, unit)
+                            .pollInterval(2, TimeUnit.SECONDS)
+                            .until(() -> adapter != null && adapter.isInitialized());
+                });
+    }
+
+    private void assertIngested(Map<String, Long> expectedLines, List<String> skippedFiles) throws Exception {
+        try (Connection conn = DriverManager.getConnection(
+                postgreSQLContainer.getJdbcUrl(),
+                postgreSQLContainer.getUsername(),
+                postgreSQLContainer.getPassword());
+             Statement stmt = conn.createStatement()) {
+            Map<String, Long> shotsPerFile = new LinkedHashMap<>();
+            try (ResultSet rs = stmt.executeQuery("SELECT filename, COUNT(*) FROM siusdata_shots GROUP BY filename")) {
+                while (rs.next()) {
+                    shotsPerFile.put(rs.getString(1), rs.getLong(2));
+                }
+            }
+            Map<String, Long> progressPerFile = new LinkedHashMap<>();
+            try (ResultSet rs = stmt.executeQuery("SELECT file_name, last_processed_line FROM file_progress")) {
+                while (rs.next()) {
+                    progressPerFile.put(rs.getString(1), rs.getLong(2));
+                }
+            }
+
+            assertEquals(expectedLines, shotsPerFile, "one siusdata_shots row per line of each result file");
+            assertEquals(expectedLines, progressPerFile, "file_progress records every line of each result file");
+            for (String skipped : skippedFiles) {
+                assertNull(shotsPerFile.get(skipped), skipped + " must not be ingested");
+                assertNull(progressPerFile.get(skipped), skipped + " must not be tracked");
+            }
+        }
     }
 
     @Test
