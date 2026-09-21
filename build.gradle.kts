@@ -84,8 +84,16 @@ tasks.test {
 
     filter {
         if (skipIntegrationTests.get()) {
-            excludeTestsMatching("ch.fmartin.SiusDataToPostgresAdapterIntegrationTest")
+            excludeTestsMatching("ch.fmartin.*IntegrationTest")
         }
+    }
+
+    // CI runs the tests on every current Java LTS while the code stays compiled for 21.
+    // Without the property the toolchain JDK runs them.
+    providers.gradleProperty("testJavaVersion").orNull?.let { version ->
+        javaLauncher.set(javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(version))
+        })
     }
 }
 
