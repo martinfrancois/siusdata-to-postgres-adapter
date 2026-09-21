@@ -1,0 +1,93 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # The Java versions to test come from endoflife.date, so a new LTS joins the
+  # matrix without a change here. Only LTS releases from 21 upward count: 21 is
+  # the toolchain in build.gradle.kts and the minimum the README promises.
+  lts:
+    name: lts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      versions: ${{ steps.pick.outputs.versions }}
+    steps:
+      - name: List current Java LTS versions from 21 upward
+        id: pick
+        run: |
+          fallback='["21","25"]'
+          versions=$(curl -fsS --max-time 20 https://endoflife.date/api/eclipse-temurin.json \
+            | jq -c '[.[] | select(.lts != false) | .cycle | select((tonumber? // 0) >= 21)] | sort_by(tonumber)') \
+            || versions=''
+          if [ -z "$versions" ] || [ "$versions" = '[]' ]; then
+            echo "::warning::endoflife.date gave no usable answer, testing the committed list $fallback instead"
+            versions=$fallback
+          fi
+          echo "Testing Java $versions"
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (Java ${{ matrix.java }})
+    needs: lts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      # Every leg must report on its own; cancelling the rest after one failure
+      # would hide which Java versions still work.
+      fail-fast: false
+      matrix:
+        java: ${{ fromJSON(needs.lts.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The toolchain compiles for 21 on every leg, so 21 has to be installed
+      # next to the JDK under test. JAVA_HOME_21_X64 tells Gradle where it is.
+      - name: Set up Java 21 for the toolchain
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Java ${{ matrix.java }}
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: gradle
+      - name: Build and run the tests on Java ${{ matrix.java }}
+        env:
+          TEST_JAVA_VERSION: ${{ matrix.java }}
+        run: >
+          ./gradlew build --no-daemon
+          -PtestJavaVersion="$TEST_JAVA_VERSION"
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+
+  # The ruleset on main requires a status check whose context is exactly "test".
+  # The matrix legs are named "build (Java N)", so this job carries the name and
+  # the combined result. Without always() it would be skipped when a leg fails,
+  # and a skipped required check does not block a merge.
+  test:
+    name: test
+    needs: build
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every Java version to have passed
+        env:
+          # For a matrix job this is the aggregate: "success" only when every leg
+          # succeeded, otherwise "failure", "cancelled" or "skipped".
+          RESULT: ${{ needs.build.result }}
+        run: |
+          echo "Matrix result: ${RESULT}"
+          if [ "${RESULT}" != "success" ]; then
+            echo "::error::At least one Java version did not pass (matrix result: ${RESULT})."
+            exit 1
+          fi
