@@ -218,12 +218,23 @@ public class SiusDataToPostgresAdapterPropertyTest {
         String numericString = inputs.get1();
         String yearString = inputs.get2();
         Timestamp timestamp = adapter.calculateTimestamp(numericString, yearString);
-        Assertions.assertNotNull(timestamp);
         long numeric = Long.parseLong(numericString.trim());
         int year = Integer.parseInt(yearString.substring(0, 4));
         Instant base = LocalDateTime.of(year, 1, 1, 0, 0).atZone(ZoneId.systemDefault()).toInstant();
-        Timestamp expected = Timestamp.from(base.plusMillis(numeric * 10L));
-        Assertions.assertEquals(expected, timestamp);
+        Instant instant = base.plusMillis(numeric * 10L);
+        // Timestamp holds epoch milliseconds in a long; an instant past that range must come back as null.
+        boolean fitsInTimestamp;
+        try {
+            Math.multiplyExact(instant.getEpochSecond(), 1000L);
+            fitsInTimestamp = true;
+        } catch (ArithmeticException e) {
+            fitsInTimestamp = false;
+        }
+        if (fitsInTimestamp) {
+            Assertions.assertEquals(Timestamp.from(instant), timestamp);
+        } else {
+            Assertions.assertNull(timestamp);
+        }
     }
 
     @Property(tries = 100)

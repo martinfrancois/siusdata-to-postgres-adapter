@@ -584,6 +584,20 @@ public class SiusDataToPostgresAdapterTest {
     }
 
     @Test
+    void testCalculateTimestamp_ValueBeyondTimestampRange() {
+        // given: 10 ms intervals that land about 29 million years after 2021, past what Timestamp can hold
+        String dateValue = Long.toString(Long.MAX_VALUE / 10);
+        String fileName = "20210000.csv";
+
+        // when
+        Timestamp timestamp = adapter.calculateTimestamp(dateValue, fileName);
+
+        // then: the same result on every JDK, logged and stored as NULL like a non-numeric value
+        assertNull(timestamp);
+        verify(logger).error(startsWith("Invalid Date value '" + dateValue + "'"), any(ArithmeticException.class));
+    }
+
+    @Test
     void testCalculateTimestamp_InvalidFileName() {
         // given
         String dateValue = "100000";
