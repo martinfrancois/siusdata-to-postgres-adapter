@@ -4,6 +4,10 @@
 
 The **SiusData to PostgreSQL Adapter** is a simple tool that automatically transfers shooting data from SIUS electronic scoring systems into a PostgreSQL database. This makes it easy for you to store, view, and analyze your shooting data.
 
+This tool is made for Windows, because SIUSData itself only exists for Windows. All instructions below are for a Windows PC.
+
+**Note**: This is an independent tool. It is not made by, affiliated with or endorsed by SIUS AG. SIUS and SIUSData are trademarks of SIUS AG and are used here only to say which software this tool works with.
+
 ## What Does It Do?
 
 - **Monitors a Folder**: Watches a specific folder on your computer where SIUSData saves CSV files containing shooting data.
@@ -199,9 +203,7 @@ The instructions for setting this up differ slightly for the **JAR file version*
     - Uncheck **"Start the task only if the computer is on AC power"** (if applicable).
 7. **Settings Tab**:
     - Check **"Allow task to be run on demand"**.
-    -
-
- Check **"If the task fails, restart every:"** and set it to `1 minute`.
+    - Check **"If the task fails, restart every:"** and set it to `1 minute`.
     - Set **"Attempt to restart up to:"** `5` times.
     - Check **"If the task is already running, then the following rule applies:"** and select **"Stop the existing instance"**.
     - Click **"OK"**.
@@ -269,6 +271,10 @@ Follow the exact same steps as in the JAR file version, except when selecting th
 2. **Configure SIUS System**:
     - Set up SIUSData to export CSV files to this folder.
 
+**Note**: SIUSData names the files it writes with the date, for example `20250928.csv`, and the application reads exactly these files. Two kinds of files that SIUSData writes next to them are skipped on purpose. Files ending in `_stl.csv` contain the start list, not shots, so the application leaves them out. SIUS documents the start list format in its start list field description, see [docs/references.md](docs/references.md). Files ending in `_mod.csv` contain shots that were changed by hand in SIUSData; the application does not support such changes and leaves those files out as well.
+
+Every shot line from the shots file is stored as one row in the `siusdata_shots` table, with its values as SIUSData exported them. The application changes only a few things on the way: the time-since-start-of-year value is turned into a real date and time, the `date` column, so the shooting day is easy to query; whole-number fields are stored as numbers and the four yes/no fields as true/false; scores, coordinates and times stay as text exactly as exported; and the file name is stored with every row. The full column list is in [docs/siusdata-format.md](docs/siusdata-format.md).
+
 ## Configure the Application
 
 You need to tell the application where to find the CSV files and how to connect to your database. This is done by setting environment variables.
@@ -291,8 +297,9 @@ You need to tell the application where to find the CSV files and how to connect 
 
       **Variable 2**:  
       - **Variable name**: `POSTGRESQL_URL`  
-      - **Variable value**: `postgresql://localhost:5432/your_database_name`
+      - **Variable value**: `jdbc:postgresql://localhost:5432/your_database_name`
         - Replace `your_database_name` with the name of the database you created (e.g., `siusdata`).
+        - The value must start with `jdbc:postgresql://`. Without it, the application stops right after starting with the message `No suitable driver`.
 
       **Variable 3**:  
       - **Variable name**: `POSTGRESQL_USER`  
@@ -348,6 +355,7 @@ You need to tell the application where to find the CSV files and how to connect 
     - Check that the filenames of the CSV files start with 8 digits and end with `.csv`.
 - **Database Connection Errors**:
     - Confirm your PostgreSQL credentials and that the database service is running.
+    - If the application stops with `No suitable driver`, make sure `POSTGRESQL_URL` starts with `jdbc:postgresql://`.
     - Revisit the environment variables to ensure they are set correctly.
 - **Pushbullet Notifications Not Working**:
     - Ensure your `PUSHBULLET_API_KEY` is correct.
@@ -410,3 +418,17 @@ If you run a Gotify server, you can receive the same error alerts there:
 - **Security**:
     - Keep your database credentials secure.
     - Do not share your Pushbullet API key.
+
+## Limitations
+
+This application works with the CSV files that SIUSData writes. SIUS has said on its support forum ([SIUSData socket information](https://support.sius.com/forums/topic/siusdata-socket-information/)) that SIUSData is an older product, that newer ranges such as the SR24 STYX no longer work with it, and that SiusAPI is the way it supports for those ranges. This application continues to be maintained for ranges that run SIUSData and its CSV export. It does not support SiusAPI, because no public documentation of SiusAPI was found.
+
+## Development
+
+Build the JAR and run the tests with `gradlew.bat build`, or `./gradlew build` on Linux and macOS. The integration tests start PostgreSQL through Testcontainers and need Docker or a compatible engine. To skip them, run `./gradlew build -PskipIntegrationTests=true`.
+
+[docs/siusdata-format.md](docs/siusdata-format.md) describes the export files as the parser reads them.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
