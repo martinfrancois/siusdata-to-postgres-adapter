@@ -95,6 +95,13 @@ tasks.test {
             languageVersion.set(JavaLanguageVersion.of(version))
         })
     }
+
+    // SiusDataToPostgresAdapterJarIntegrationTest starts the shadow jar in a separate JVM.
+    val shadowJarFile = tasks.shadowJar.flatMap { it.archiveFile }
+    inputs.file(shadowJarFile)
+    doFirst {
+        systemProperty("siusdata.shadowJar", shadowJarFile.get().asFile.absolutePath)
+    }
 }
 
 graalvmNative {
