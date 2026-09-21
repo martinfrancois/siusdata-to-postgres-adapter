@@ -2,7 +2,7 @@ package ch.fmartin;
 
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,7 +43,7 @@ class SiusDataToPostgresAdapterJarIntegrationTest {
         Path output = workDir.resolve("adapter.out");
         int expectedShots = copyFixture(csvDir.resolve(FIXTURE));
 
-        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(TestImages.POSTGRES)
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestImages.POSTGRES)
                 .withDatabaseName("test")
                 .withUsername("test")
                 .withPassword("test")
@@ -100,15 +100,15 @@ class SiusDataToPostgresAdapterJarIntegrationTest {
                 .orElse(Path.of(System.getProperty("java.home"), "bin", "java").toString());
     }
 
-    private static int countShots(PostgreSQLContainer<?> postgres) throws SQLException {
+    private static int countShots(PostgreSQLContainer postgres) throws SQLException {
         return queryInt(postgres, "SELECT COUNT(*) FROM siusdata_shots");
     }
 
-    private static int lastProcessedLine(PostgreSQLContainer<?> postgres) throws SQLException {
+    private static int lastProcessedLine(PostgreSQLContainer postgres) throws SQLException {
         return queryInt(postgres, "SELECT last_processed_line FROM file_progress WHERE file_name = '" + FIXTURE + "'");
     }
 
-    private static int queryInt(PostgreSQLContainer<?> postgres, String sql) throws SQLException {
+    private static int queryInt(PostgreSQLContainer postgres, String sql) throws SQLException {
         try (Connection connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery(sql)) {

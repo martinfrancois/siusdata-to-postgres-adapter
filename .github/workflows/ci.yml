@@ -67,7 +67,7 @@ jobs:
         run: >
           ./gradlew build --no-daemon
           -PtestJavaVersion="$TEST_JAVA_VERSION"
-          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+          -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
   # The ruleset on main requires a status check whose context is exactly "test".
   # The matrix legs are named "build (Java N)", so this job carries the name and
