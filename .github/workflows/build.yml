@@ -32,7 +32,6 @@ jobs:
           java-version: '25.0.4'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: gradle
 
       - name: Verify GraalVM installation
         run: |
@@ -44,7 +43,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
-          cache-disabled: true  # Disable caching here to avoid redundancy with the GraalVM setup
+          # Let setup-gradle manage its own cache after Gradle creates the expected paths.
+          cache-disabled: false
 
       - name: Build JAR with Gradle
         run: .\gradlew shadowJar --scan
