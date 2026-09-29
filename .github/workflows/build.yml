@@ -1,24 +1,37 @@
-name: Build
+name: Release
+
+permissions:
+  contents: read
 
 on:
   push:
 
+# Only the newest commit on a branch needs a complete build. This is especially
+# important on main, where every completed run creates a Windows release.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@2a2412009026a83f51d179f92dc2b3fd4c8142df # v1
+        uses: graalvm/setup-graalvm@0426e2e191540e8514dff98dc52a5f5146a2a276 # v1.6.6
         with:
-          java-version: '21'
+          java-version: '25.0.4'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: gradle
 
       - name: Verify GraalVM installation
         run: |
@@ -28,9 +41,10 @@ jobs:
           native-image --version
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
-          cache-disabled: true  # Disable caching here to avoid redundancy with the GraalVM setup
+          # Let setup-gradle manage its own cache after Gradle creates the expected paths.
+          cache-disabled: false
 
       - name: Build JAR with Gradle
         run: .\gradlew shadowJar --scan
@@ -51,7 +65,7 @@ jobs:
           echo "date=$date" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Create GitHub Release and Upload Artifacts
-        uses: softprops/action-gh-release@aec2ec56f94eb8180ceec724245f64ef008b89f5 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.date.outputs.date }}
           name: Release ${{ steps.date.outputs.date }}
@@ -61,38 +75,131 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build:
-    if: github.ref != 'refs/heads/master'
-    runs-on: ubuntu-latest
+  windows-native:
+    if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
+      - name: Checkout exact branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          distribution: 'zulu'
-          java-version: '21'
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@0426e2e191540e8514dff98dc52a5f5146a2a276 # v1.6.6
+        with:
+          java-version: '25.0.4'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run unit tests
-        run: ./gradlew test --scan
+      - name: Setup Gradle without branch-writable caches
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-disabled: true
 
-      - name: Run fuzz tests
-        run: ./gradlew jqfFuzz --scan
+      - name: Build Windows JAR and native image
+        shell: pwsh
+        run: .\gradlew.bat shadowJar nativeCompile --no-daemon
+
+      # Building the executable proves nothing about whether it runs: GraalVM
+      # reflection gaps only show at runtime. windows-latest ships PostgreSQL as
+      # a stopped service (user postgres, password root, PGBIN set), so the
+      # executable is started against it and must import the fixture file.
+      - name: Run the native executable against PostgreSQL
+        shell: pwsh
         env:
-          JQF_ZEST_MAX_TIME: 300s
+          PGPASSWORD: root
+        run: |
+          $service = Get-Service -Name 'postgresql*' | Select-Object -First 1
+          if (-not $service) { throw 'No PostgreSQL service on this runner' }
+          Set-Service -Name $service.Name -StartupType Manual
+          Start-Service -Name $service.Name
+          $psql = Join-Path $env:PGBIN 'psql.exe'
+          $created = $false
+          foreach ($attempt in 1..15) {
+            & $psql -U postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 -c 'CREATE DATABASE siusdata'
+            if ($LASTEXITCODE -eq 0) { $created = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $created) { throw 'Could not create the database' }
 
-      - name: Upload fuzzing artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+          $fixture = 'src/test/resources/reproduction/20250928.csv'
+          $expected = @(Get-Content $fixture | Where-Object { $_.Trim() -ne '' }).Count
+          $csvDir = Join-Path $env:RUNNER_TEMP 'incoming'
+          New-Item -ItemType Directory -Force -Path $csvDir | Out-Null
+          Copy-Item $fixture $csvDir
+          $exe = @(Get-ChildItem -LiteralPath 'build/native/nativeCompile' -Filter 'siusdata-to-postgres-adapter*.exe' -File)[0].FullName
+
+          $env:CSV_MONITOR_PATH = $csvDir
+          $env:POSTGRESQL_URL = 'jdbc:postgresql://127.0.0.1:5432/siusdata'
+          $env:POSTGRESQL_USER = 'postgres'
+          $env:POSTGRESQL_PASSWORD = 'root'
+          $stdout = Join-Path $env:RUNNER_TEMP 'native-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'native-stderr.txt'
+          $process = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+
+          $rows = -1
+          foreach ($attempt in 1..60) {
+            Start-Sleep -Seconds 2
+            if ($process.HasExited) { break }
+            $count = & $psql -U postgres -h 127.0.0.1 -d siusdata -t -A -c 'SELECT count(*) FROM siusdata_shots' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $count) {
+              $rows = [int]$count.Trim()
+              if ($rows -eq $expected) { break }
+            }
+          }
+          $exited = $process.HasExited
+          if (-not $exited) { Stop-Process -Id $process.Id -Force }
+          Write-Host '--- executable output'
+          Get-Content $stdout, $stderr
+          if ($exited) { throw "The executable exited with code $($process.ExitCode) instead of watching the folder" }
+          if ($rows -ne $expected) { throw "Expected $expected rows in siusdata_shots, found $rows" }
+          Write-Host "The native executable imported $rows shots"
+
+      - name: Verify and package Windows artifacts
+        id: artifact
+        shell: pwsh
+        run: |
+          $output = 'build/native/nativeCompile'
+          $executables = @(Get-ChildItem -LiteralPath $output -Filter 'siusdata-to-postgres-adapter*.exe' -File)
+          if ($executables.Count -ne 1) {
+            throw "Expected exactly one native executable, found $($executables.Count)"
+          }
+          if ($executables[0].Length -le 0) {
+            throw 'Native executable is empty'
+          }
+          $dlls = @(Get-ChildItem -LiteralPath $output -Filter '*.dll' -File)
+          $archive = Join-Path $output 'siusdata-to-postgres-adapter-native-executable.zip'
+          $inputs = @($executables.FullName) + @($dlls | ForEach-Object { $_.FullName })
+          Compress-Archive -LiteralPath $inputs -DestinationPath $archive
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw 'Native artifact archive was not created'
+          }
+          $entries = @(tar -tf $archive)
+          $expected = @($inputs | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+          $actual = @($entries | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+          if ($LASTEXITCODE -ne 0 -or (Compare-Object $expected $actual)) {
+            throw 'Native artifact archive does not exactly match the built executable and DLL set'
+          }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          @(
+            '### Windows native artifact'
+            ''
+            'Commit: ${{ github.sha }}'
+            ''
+            "SHA-256: $digest"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload exact-head Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: jqf-artifacts
-          path: build/jqf
-          if-no-files-found: ignore
-
-      - name: Build with Gradle
-        run: ./gradlew build --scan
+          name: windows-native-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 7

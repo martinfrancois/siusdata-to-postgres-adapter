@@ -423,7 +423,7 @@ public class SiusDataToPostgresAdapterTest {
         adapter.submitFileForProcessing(filePath, false);
 
         // then
-        verify(logger).info("File {} is already queued or being processed. Skipping submission.", "testfile.csv");
+        verify(logger).debug("File {} is already queued or being processed. Skipping submission.", "testfile.csv");
         verifyNoInteractions(executorService);
     }
 
@@ -581,6 +581,20 @@ public class SiusDataToPostgresAdapterTest {
 
         // then
         assertNull(timestamp);
+    }
+
+    @Test
+    void testCalculateTimestamp_ValueBeyondTimestampRange() {
+        // given: 10 ms intervals that land about 29 million years after 2021, past what Timestamp can hold
+        String dateValue = Long.toString(Long.MAX_VALUE / 10);
+        String fileName = "20210000.csv";
+
+        // when
+        Timestamp timestamp = adapter.calculateTimestamp(dateValue, fileName);
+
+        // then: the same result on every JDK, logged and stored as NULL like a non-numeric value
+        assertNull(timestamp);
+        verify(logger).error(startsWith("Invalid Date value '" + dateValue + "'"), any(ArithmeticException.class));
     }
 
     @Test
@@ -833,7 +847,7 @@ public class SiusDataToPostgresAdapterTest {
         CsvRecord csvRecord = csvRecords.getFirst();
 
         // when
-        adapter.insertRecordIntoDatabase(mockConnection, csvRecord, "20210000.csv");
+        adapter.populateInsertStatement(mockStatement, csvRecord, "20210000.csv");
 
         // then
         verify(mockStatement, atLeastOnce()).setInt(anyInt(), anyInt());
@@ -841,8 +855,6 @@ public class SiusDataToPostgresAdapterTest {
         verify(mockStatement, atLeastOnce()).setBoolean(anyInt(), anyBoolean());
         verify(mockStatement, atLeastOnce()).setLong(anyInt(), anyLong());
         verify(mockStatement, atLeastOnce()).setTimestamp(anyInt(), any(Timestamp.class));
-        verify(mockStatement).executeUpdate();
-        verify(mockStatement).close();
     }
 
     @Test
