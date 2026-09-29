@@ -65,7 +65,7 @@
       "matchManagers": [
         "gradle"
       ],
-      "matchPackageNames": [
+      "matchDepNames": [
         "org.openrewrite.rewrite"
       ],
       "allowedVersions": "!/^(?:7\\.40\\.0|7\\.41\\.0)$/"
