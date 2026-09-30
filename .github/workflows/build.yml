@@ -45,9 +45,12 @@ jobs:
         with:
           # Let setup-gradle manage its own cache after Gradle creates the expected paths.
           cache-disabled: false
+          # The default provider is a proprietary component under the Gradle
+          # Technologies Terms of Use; basic is the MIT-licensed actions/cache one.
+          cache-provider: basic
 
       - name: Build JAR with Gradle
-        run: .\gradlew shadowJar --scan
+        run: .\gradlew shadowJar
 
       - name: Build Native Image for Windows
         run: .\gradlew nativeCompile
