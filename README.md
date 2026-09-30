@@ -425,7 +425,7 @@ This application works with the CSV files that SIUSData writes. SIUS has said on
 
 ## Development
 
-Build the JAR and run the tests with `gradlew.bat build`, or `./gradlew build` on Linux and macOS. The integration tests start PostgreSQL through Testcontainers and need Docker or a compatible engine. To skip them, run `./gradlew build -PskipIntegrationTests=true`.
+Build the JAR and run the tests with `gradlew.bat build`, or `./gradlew build` on Linux and macOS. The integration tests start PostgreSQL through Testcontainers and need Docker or a compatible engine. To skip them, run `./gradlew build -PskipIntegrationTests=true`. `./gradlew fuzz` runs the [JQF](https://github.com/rohanpadhye/JQF) fuzz tests, and [AGENTS.md](AGENTS.md) explains the options.
 
 [docs/siusdata-format.md](docs/siusdata-format.md) describes the export files as the parser reads them.
 
