@@ -20,9 +20,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Coverage-guided fuzz tests for the path a shot line takes from the file into the insert statement.
- * {@code ./gradlew fuzz} runs a campaign, and {@code ./gradlew check} replays the inputs it saved.
+ * {@code ./gradlew fuzz} runs a campaign. {@code ./gradlew check} replays the corpus the last campaign
+ * saved and the inputs under {@value #REGRESSION_INPUTS}, where failing inputs go once they are fixed.
  */
 class SiusDataToPostgresAdapterFuzzTest {
+
+    private static final String REGRESSION_INPUTS = "src/fuzzTest/regression/everyLineWithAllFieldsFillsEveryColumn";
 
     // Column 1 is the file name, columns 2 to 29 hold the fields of the line.
     private static final List<Integer> ALL_COLUMNS = IntStream.rangeClosed(1, ShotFile.FIELD_COUNT + 1).boxed().toList();
@@ -40,7 +43,7 @@ class SiusDataToPostgresAdapterFuzzTest {
      * value does not fit. An exception or an unset parameter would make the insert fail, and the
      * adapter would then retry the whole file forever.
      */
-    @FuzzTest
+    @FuzzTest(seeds = REGRESSION_INPUTS)
     void everyLineWithAllFieldsFillsEveryColumn(@From(ShotFileGenerator.class) ShotFile shotFile) {
         List<CsvRecord> records = parse(shotFile);
         assertEquals(shotFile.lines().size(), records.size(), "lines read from the file");

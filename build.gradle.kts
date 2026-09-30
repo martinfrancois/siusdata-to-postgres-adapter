@@ -3,7 +3,6 @@ version = "1.0-SNAPSHOT"
 
 plugins {
     id("java")
-    id("jvm-test-suite")
     id("org.openrewrite.rewrite") version "7.39.0"
     id("com.gradleup.shadow") version "9.6.1"
     id("org.graalvm.buildtools.native") version "1.1.14"
@@ -102,13 +101,6 @@ tasks.test {
         }
     }
 
-    // CI runs the tests on every current Java LTS while the code stays compiled for 21.
-    // Without the property the toolchain JDK runs them.
-    providers.gradleProperty("testJavaVersion").orNull?.let { version ->
-        javaLauncher.set(javaToolchains.launcherFor {
-            languageVersion.set(JavaLanguageVersion.of(version))
-        })
-    }
 
     // SiusDataToPostgresAdapterJarIntegrationTest starts the shadow jar in a separate JVM.
     val shadowJarFile = tasks.shadowJar.flatMap { it.archiveFile }
@@ -118,10 +110,20 @@ tasks.test {
     }
 }
 
+// CI runs the tests on every current Java LTS while the code stays compiled for 21.
+// Without the property the toolchain JDK runs them.
+tasks.withType<Test>().configureEach {
+    providers.gradleProperty("testJavaVersion").orNull?.let { version ->
+        javaLauncher.set(javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(version))
+        })
+    }
+}
+
 val fuzzResults = layout.buildDirectory.dir("fuzz-results")
 
-// JQF saves the inputs a campaign finds under jqf.fuzz.out, and the regression run replays them from there.
-fun Test.runFuzzTests() {
+// A campaign saves the inputs that reach new code under jqf.fuzz.out, and the regression run replays them from there.
+fun Test.useFuzzTestSuite() {
     val fuzzTestSourceSet = sourceSets["fuzzTest"]
     testClassesDirs = fuzzTestSourceSet.output.classesDirs
     classpath = fuzzTestSourceSet.runtimeClasspath
@@ -134,7 +136,7 @@ fun Test.runFuzzTests() {
 testing {
     suites {
         register<JvmTestSuite>("fuzzTest") {
-            // The fuzz tests reuse the unit test dependencies, so JUnit and Mockito keep a single version.
+            // The fuzz tests reuse the unit test dependencies, so both suites resolve JUnit from one BOM.
             configurations.named(sources.implementationConfigurationName) {
                 extendsFrom(configurations.testImplementation.get())
             }
@@ -145,10 +147,13 @@ testing {
             }
             targets.all {
                 testTask.configure {
-                    runFuzzTests()
-                    // A new campaign changes what the regression run replays.
+                    useFuzzTestSuite()
+                    // A new campaign or a new regression input changes what this task replays.
                     inputs.files(fileTree(fuzzResults) { include("**/corpus/**") })
                         .withPropertyName("fuzzCorpus")
+                        .withPathSensitivity(PathSensitivity.RELATIVE)
+                    inputs.files(fileTree("src/fuzzTest/regression"))
+                        .withPropertyName("fuzzRegressionInputs")
                         .withPathSensitivity(PathSensitivity.RELATIVE)
                 }
             }
@@ -161,24 +166,22 @@ tasks.check {
     dependsOn(testing.suites.named("fuzzTest"))
 }
 
-tasks.named("fuzzTest") {
-    mustRunAfter("fuzz")
-}
-
 tasks.register<Test>("fuzz") {
     description = "Runs a coverage-guided JQF campaign on every @FuzzTest method. " +
         "-PfuzzDuration=10m sets the time per method, -PfuzzRepro=<file> replays one saved input instead."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    runFuzzTests()
+    // A campaign empties the corpus directory before it starts, so a replay of that corpus has to come first.
+    mustRunAfter("fuzzTest")
+    useFuzzTestSuite()
     systemProperty("jqf.fuzz", "true")
     systemProperty("jqf.fuzz.duration", providers.gradleProperty("fuzzDuration").getOrElse("60s"))
     providers.gradleProperty("fuzzRepro").orNull?.let { systemProperty("jqf.repro", file(it).absolutePath) }
     // Zest otherwise redraws a full-screen status view, which a Gradle log cannot show.
     systemProperty("jqf.ei.QUIET_MODE", "true")
     // The agent measures the branch coverage that guides Zest. Without it the campaign is random input only.
-    // It instruments only the adapter and the CSV parser: an empty exclude prefix matches every class,
-    // and the includes win over it. Instrumented JDK classes would fail to load, and those of JUnit
-    // and Gradle only slow each trial down.
+    // It instruments only the project's classes and FastCSV: an empty exclude prefix matches every
+    // class, and the includes win over it. Instrumented JDK classes would fail to load, and those of
+    // JUnit and Gradle only slow each trial down.
     systemProperty("janala.excludes", "")
     systemProperty("janala.includes", "ch/fmartin/,de/siegmar/fastcsv/")
     inputs.files(jqfAgent)

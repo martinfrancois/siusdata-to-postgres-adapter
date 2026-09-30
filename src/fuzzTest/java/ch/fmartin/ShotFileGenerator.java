@@ -12,8 +12,7 @@ import java.util.List;
  * Generates main files whose lines all have the right number of fields but any content in them:
  * numbers past the column's range, blanks, and text with separators, quotes and line breaks.
  *
- * <p>Every range comes from {@code nextInt(bound)}. Under Zest, {@code nextInt(min, max)} never
- * returns {@code max}, although junit-quickcheck documents it as inclusive.
+ * <p>Every range comes from {@code nextInt(bound)}, see {@link JqfRangeTest}.
  */
 public class ShotFileGenerator extends Generator<ShotFile> {
 

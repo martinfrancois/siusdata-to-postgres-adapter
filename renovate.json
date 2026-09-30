@@ -101,7 +101,7 @@
       "groupName": "jqwik"
     },
     {
-      "description": "Lockstep: every edu.berkeley.cs.jqf module is released together under one version, and build.gradle.kts declares jqf-junit5, jqf-generator-quickcheck and the jqf-instrument agent through the shared jqfVersion variable. The agent's instrumentation has to match the engine that reads its coverage, so every update, not only majors, is one pull request.",
+      "description": "Lockstep: every edu.berkeley.cs.jqf module is released together under one version, and build.gradle.kts declares every JQF dependency, the instrumentation agent included, through the shared jqfVersion variable. The agent's instrumentation has to match the engine that reads its coverage, so every update, not only majors, is one pull request.",
       "matchPackageNames": [
         "/^edu\\.berkeley\\.cs\\.jqf:/"
       ],
