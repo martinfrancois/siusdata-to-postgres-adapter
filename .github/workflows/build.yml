@@ -45,6 +45,9 @@ jobs:
         with:
           # Let setup-gradle manage its own cache after Gradle creates the expected paths.
           cache-disabled: false
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
 
       - name: Build JAR with Gradle
         run: .\gradlew shadowJar
@@ -99,7 +102,13 @@ jobs:
       - name: Setup Gradle without branch-writable caches
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
-          cache-disabled: true
+          # Reads the Gradle User Home that main's release job saved and never
+          # writes one back, so a branch cannot change what main or other
+          # branches restore.
+          cache-read-only: true
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
 
       - name: Build Windows JAR and native image
         shell: pwsh
