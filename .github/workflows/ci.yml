@@ -69,25 +69,71 @@ jobs:
           -PtestJavaVersion="$TEST_JAVA_VERSION"
           -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
+  # A coverage-guided campaign on every @FuzzTest method. It starts from the
+  # corpus the last run on main saved, so the campaigns build on each other
+  # instead of starting from nothing every time. Only main saves the corpus,
+  # so a pull request cannot change what later runs start from.
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21.0.12"
+          cache: gradle
+      - name: Restore the corpus from main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/fuzz-results/**/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz each @FuzzTest method for five minutes
+        run: ./gradlew fuzz --no-daemon -PfuzzDuration=5m
+      - name: Save the corpus
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/fuzz-results/**/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+      # ./gradlew fuzz -PfuzzRepro=<file> --tests '<class>.<method>' replays a downloaded input.
+      - name: Upload the inputs that failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-failures
+          path: build/fuzz-results/**/failures
+          if-no-files-found: ignore
+
   # The ruleset on main requires a status check whose context is exactly "test".
   # The matrix legs are named "build (Java N)", so this job carries the name and
-  # the combined result. Without always() it would be skipped when a leg fails,
-  # and a skipped required check does not block a merge.
+  # the combined result of the matrix and the fuzz job. Without always() it would
+  # be skipped when a job fails, and a skipped required check does not block a merge.
   test:
     name: test
-    needs: build
+    needs: [build, fuzz]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every Java version to have passed
+      - name: Require every Java version and the fuzz campaign to have passed
         env:
           # For a matrix job this is the aggregate: "success" only when every leg
           # succeeded, otherwise "failure", "cancelled" or "skipped".
-          RESULT: ${{ needs.build.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          FUZZ_RESULT: ${{ needs.fuzz.result }}
         run: |
-          echo "Matrix result: ${RESULT}"
-          if [ "${RESULT}" != "success" ]; then
-            echo "::error::At least one Java version did not pass (matrix result: ${RESULT})."
+          echo "Matrix result: ${BUILD_RESULT}, fuzz result: ${FUZZ_RESULT}"
+          if [ "${BUILD_RESULT}" != "success" ]; then
+            echo "::error::At least one Java version did not pass (matrix result: ${BUILD_RESULT})."
+            exit 1
+          fi
+          if [ "${FUZZ_RESULT}" != "success" ]; then
+            echo "::error::The fuzz campaign did not pass (result: ${FUZZ_RESULT}). The fuzz-failures artifact holds the failing inputs."
             exit 1
           fi
