@@ -4,6 +4,10 @@
 
 `./gradlew build` (`gradlew.bat build` on Windows) compiles for Java 21, runs the unit, property and integration tests and packs the shadow jar. The integration tests start PostgreSQL and Toxiproxy through Testcontainers and need Docker or a compatible engine; `-PskipIntegrationTests=true` leaves them out. `-PtestJavaVersion=25` runs the tests on another installed JDK, which is what CI does for every current Java LTS from 21 upward.
 
+`src/fuzzTest` holds [JQF](https://github.com/rohanpadhye/JQF) fuzz tests, JUnit 5 methods annotated with `@FuzzTest`. `./gradlew fuzz` runs a coverage-guided campaign of 60 seconds per method, `-PfuzzDuration=10m` changes that. CI runs five minutes per method on every pull request and every push to main, starting from the corpus the last run on main saved. A campaign saves the inputs that reach new code under `build/fuzz-results/<class>/<method>/corpus` and the inputs that fail under `failures`. `./gradlew build` replays the saved corpus through the `fuzzTest` task. `./gradlew fuzz --tests '<class>.<method>' -PfuzzRepro=<file>` replays one failing input, for example one from the `fuzz-failures` artifact of a CI run.
+
+A generator for a fuzz test takes every range from `random.nextInt(bound)`. JQF's `nextInt(min, max)` never returns `max`, although junit-quickcheck documents it as inclusive, so a branch that needs `max` is never generated during a campaign.
+
 ## After every CI run
 
 Read the logs of every job, not only the pass or fail result. Warnings and errors count as findings even when the job is green. Take the logs with `gh run view <run> --log` and look at compiler notes and lint output, Gradle deprecation messages, GraalVM native-image warnings, Testcontainers and JDBC warnings, `curl` and `jq` output in the `lts` job, and anything the workflow prints with `::warning::` or `::error::`.

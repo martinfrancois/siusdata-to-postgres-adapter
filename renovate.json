@@ -101,6 +101,13 @@
       "groupName": "jqwik"
     },
     {
+      "description": "Lockstep: every edu.berkeley.cs.jqf module is released together under one version, and build.gradle.kts declares jqf-junit5, jqf-generator-quickcheck and the jqf-instrument agent through the shared jqfVersion variable. The agent's instrumentation has to match the engine that reads its coverage, so every update, not only majors, is one pull request.",
+      "matchPackageNames": [
+        "/^edu\\.berkeley\\.cs\\.jqf:/"
+      ],
+      "groupName": "jqf"
+    },
+    {
       "description": "Lockstep: the org.openrewrite.rewrite Gradle plugin and the recipe artifact on the `rewrite` configuration must agree on rewrite-core. `gradlew buildEnvironment` shows plugin 7.38.0 -> org.openrewrite:plugin:7.38.0 -> org.openrewrite:rewrite-bom:8.88.0, and rewrite-migrate-java:3.41.0 pulls org.openrewrite:rewrite-java:8.88.0. A recipe compiled against a newer rewrite-core than the plugin loads fails at recipe-run time, not at configuration time.",
       "matchUpdateTypes": [
         "major"
