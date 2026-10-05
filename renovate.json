@@ -133,6 +133,13 @@
         ".github/workflows/build.yml"
       ],
       "enabled": false
+    },
+    {
+      "description": "Toxiproxy publishes its image only on GHCR, and Renovate's docker datasource reads release timestamps from Docker Hub alone, so under minimumReleaseAgeBehaviour timestamp-required a toxiproxy update would stay pending forever. Look the image up through the toxiproxy-ghcr custom datasource instead, which reads the same tags from GitHub's container package API together with each version's created_at timestamp, so the seven-day minimumReleaseAge applies to this image like to every other dependency.",
+      "matchPackageNames": [
+        "ghcr.io/shopify/toxiproxy"
+      ],
+      "overrideDatasource": "custom.toxiproxy-ghcr"
     }
   ],
   "customManagers": [
@@ -149,5 +156,22 @@
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     }
+  ],
+  "customDatasources": {
+    "toxiproxy-ghcr": {
+      "description": "GitHub's newest 100 package-version records for ghcr.io/shopify/toxiproxy. Every exact semantic-version tag becomes a release with the record's created_at as its release timestamp and the record's manifest digest; architecture-suffixed tags, v2.x aliases and latest are left out.",
+      "defaultRegistryUrlTemplate": "https://api.github.com/users/shopify/packages/container/toxiproxy/versions?per_page=100",
+      "format": "json",
+      "transformTemplates": [
+        "($semver := /^[0-9]+\\.[0-9]+\\.[0-9]+$/; $releases := $reduce($, function($all, $record) { ($versions := $filter($record.metadata.container.tags, function($tag) { $match($tag, $semver) }); $append($all, $map($versions, function($version) { {\"version\": $version, \"releaseTimestamp\": $record.created_at, \"digest\": $record.name, \"sourceUrl\": \"https://github.com/Shopify/toxiproxy\"} }))) }, []); {\"releases\": [$releases], \"sourceUrl\": \"https://github.com/Shopify/toxiproxy\"})"
+      ]
+    }
+  },
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__fixtures__/**"
   ]
 }
