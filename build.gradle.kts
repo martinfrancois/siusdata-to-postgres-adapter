@@ -51,7 +51,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-toxiproxy:2.0.5")
     testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
-    testImplementation("net.jqwik:jqwik:1.10.1")
+    testImplementation("net.jqwik:jqwik:1.10.2")
     testRuntimeOnly("net.jqwik:jqwik-engine:1.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
