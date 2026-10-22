@@ -62,7 +62,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
         postgreSQLContainer.start();
 
         // Initialize Toxiproxy container and proxy for PostgreSQL
-        toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.12.0")
+        toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.13.0")
                 .withNetwork(network);
         toxiproxy.start();
 
