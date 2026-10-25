@@ -81,9 +81,42 @@ jobs:
           -PtestJavaVersion="$TEST_JAVA_VERSION"
           -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
-  # Replays the corpus the last run on main saved, then runs a coverage-guided
-  # campaign on every @FuzzTest method. Only main saves the corpus, so a pull
-  # request cannot change what later runs replay.
+  # Replay saved inputs independently so every regression blocks the required check.
+  replay:
+    name: replay
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      # Keeps checkout's hint about 'master' out of the log, as in the build job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
+        with:
+          persist-credentials: false
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21.0.12"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
+      - name: Restore the corpus from main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/fuzz-results/**/corpus
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-
+      - name: Replay saved inputs
+        run: ./gradlew fuzzTest --no-daemon
+
+  # Random campaigns report findings without blocking the required test check.
+  # Only main saves the corpus, so pull requests cannot change later replay inputs.
   fuzz:
     name: fuzz
     runs-on: ubuntu-26.04
@@ -112,14 +145,8 @@ jobs:
           build-scan-publish: true
           build-scan-terms-of-use-url: https://gradle.com/terms-of-service
           build-scan-terms-of-use-agree: "yes"
-      - name: Restore the corpus from main
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/fuzz-results/**/corpus
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: fuzz-corpus-
-      - name: Replay the corpus, then fuzz each @FuzzTest method for ${{ env.FUZZ_DURATION }}
-        run: ./gradlew fuzzTest fuzz --no-daemon -PfuzzDuration="$FUZZ_DURATION"
+      - name: Fuzz each @FuzzTest method for ${{ env.FUZZ_DURATION }}
+        run: ./gradlew fuzz --no-daemon -PfuzzDuration="$FUZZ_DURATION"
       # A failing campaign still saves the corpus it built; the failing inputs sit apart from it.
       - name: Save the corpus
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
@@ -138,28 +165,28 @@ jobs:
 
   # The ruleset on main requires a status check whose context is exactly "test".
   # The matrix legs are named "build (Java N)", so this job carries the name and
-  # the combined result of the matrix and the fuzz job. Without always() it would
+  # the combined result of the matrix and the saved-input replay. Without always() it would
   # be skipped when a job fails, and a skipped required check does not block a merge.
   test:
     name: test
-    needs: [build, fuzz]
+    needs: [build, replay]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - name: Require every Java version and the fuzz campaign to have passed
+      - name: Require every Java version and saved-input replay to have passed
         env:
           # For a matrix job this is the aggregate: "success" only when every leg
           # succeeded, otherwise "failure", "cancelled" or "skipped".
           BUILD_RESULT: ${{ needs.build.result }}
-          FUZZ_RESULT: ${{ needs.fuzz.result }}
+          REPLAY_RESULT: ${{ needs.replay.result }}
         run: |
-          echo "Matrix result: ${BUILD_RESULT}, fuzz result: ${FUZZ_RESULT}"
+          echo "Matrix result: ${BUILD_RESULT}, replay result: ${REPLAY_RESULT}"
           if [ "${BUILD_RESULT}" != "success" ]; then
             echo "::error::At least one Java version did not pass (matrix result: ${BUILD_RESULT})."
             exit 1
           fi
-          if [ "${FUZZ_RESULT}" != "success" ]; then
-            echo "::error::The fuzz campaign did not pass (result: ${FUZZ_RESULT}). The fuzz-failures artifact holds the failing inputs."
+          if [ "${REPLAY_RESULT}" != "success" ]; then
+            echo "::error::Saved-input replay did not pass (result: ${REPLAY_RESULT})."
             exit 1
           fi
