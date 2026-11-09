@@ -1,0 +1,32 @@
+name: Bug report
+description: Report something that doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Leave out passwords, API keys, tokens, shooters' names and other personal data, also from logs and screenshots.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How you started the adapter and what happened to the CSV files, ideally with a small made-up example file.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Release, JAR or native Windows executable, Windows version, Java version and PostgreSQL version.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: The console output or the lines from logs/siusdata-adapter.log around the problem.
+      render: text
