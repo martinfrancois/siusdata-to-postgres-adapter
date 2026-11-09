@@ -1,7 +1,6 @@
 package ch.fmartin;
 
 import com.sun.net.httpserver.HttpServer;
-import com.zaxxer.hikari.HikariDataSource;
 import org.json.JSONObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,11 +11,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.WatchService;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -68,10 +65,8 @@ class NotificationClientTest {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    private SiusDataToPostgresAdapter adapter(String pushbulletApiKey, String gotifyUrl, String gotifyToken, int gotifyPriority) {
-        return new SiusDataToPostgresAdapter(logger, mock(ExecutorService.class), mock(HikariDataSource.class),
-                mock(WatchService.class), "test_directory", "jdbc:postgresql://localhost/testdb", "user", "password",
-                pushbulletApiKey, gotifyUrl, gotifyToken, gotifyPriority);
+    private Notifier notifier(String pushbulletApiKey, String gotifyUrl, String gotifyToken, int gotifyPriority) {
+        return new Notifier(logger, pushbulletApiKey, gotifyUrl, gotifyToken, gotifyPriority);
     }
 
     private RecordedRequest onlyRequest() {
@@ -81,10 +76,10 @@ class NotificationClientTest {
 
     @Test
     void pushbulletPostsANoteWithTheAccessToken() {
-        SiusDataToPostgresAdapter adapter = adapter("secret-token", null, null, 5);
-        adapter.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
+        Notifier notifier = notifier("secret-token", null, null, 5);
+        notifier.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
 
-        adapter.sendPushbulletNotification("Title", "Body text");
+        notifier.sendPushbulletNotification("Title", "Body text");
 
         RecordedRequest request = onlyRequest();
         assertEquals("POST", request.method());
@@ -103,10 +98,10 @@ class NotificationClientTest {
     void pushbulletLogsStatusAndBodyWhenRejected() {
         responseStatus = 401;
         responseBody = "{\"error\":{\"message\":\"Access token is missing or invalid\"}}";
-        SiusDataToPostgresAdapter adapter = adapter("wrong-token", null, null, 5);
-        adapter.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
+        Notifier notifier = notifier("wrong-token", null, null, 5);
+        notifier.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
 
-        adapter.sendPushbulletNotification("Title", "Body text");
+        notifier.sendPushbulletNotification("Title", "Body text");
 
         onlyRequest();
         verify(logger).error("Failed to send Pushbullet notification. Response Code: {}", 401);
@@ -115,11 +110,11 @@ class NotificationClientTest {
 
     @Test
     void pushbulletLogsAConnectionFailureInsteadOfThrowing() {
-        SiusDataToPostgresAdapter adapter = adapter("secret-token", null, null, 5);
-        adapter.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
+        Notifier notifier = notifier("secret-token", null, null, 5);
+        notifier.setPushbulletEndpoint(baseUrl() + "/v2/pushes");
         server.stop(0);
 
-        adapter.sendPushbulletNotification("Title", "Body text");
+        notifier.sendPushbulletNotification("Title", "Body text");
 
         assertTrue(requests.isEmpty());
         verify(logger).error(eq("Error sending Pushbullet notification: {}"), anyString(), any(IOException.class));
@@ -127,9 +122,9 @@ class NotificationClientTest {
 
     @Test
     void gotifyPostsTheMessageWithKeyAndPriority() {
-        SiusDataToPostgresAdapter adapter = adapter(null, baseUrl(), "app-token", 7);
+        Notifier notifier = notifier(null, baseUrl(), "app-token", 7);
 
-        adapter.sendGotifyNotification("Title", "Body text");
+        notifier.sendGotifyNotification("Title", "Body text");
 
         RecordedRequest request = onlyRequest();
         assertEquals("POST", request.method());
@@ -146,9 +141,9 @@ class NotificationClientTest {
 
     @Test
     void gotifyAppendsMessageToAUrlWithATrailingSlashAndAPath() {
-        SiusDataToPostgresAdapter adapter = adapter(null, baseUrl() + "/gotify/", "app-token", 5);
+        Notifier notifier = notifier(null, baseUrl() + "/gotify/", "app-token", 5);
 
-        adapter.sendGotifyNotification("Title", "Body text");
+        notifier.sendGotifyNotification("Title", "Body text");
 
         assertEquals("/gotify/message", onlyRequest().path());
     }
@@ -157,9 +152,9 @@ class NotificationClientTest {
     void gotifyLogsStatusAndBodyWhenRejected() {
         responseStatus = 403;
         responseBody = "{\"error\":\"Forbidden\",\"errorCode\":403}";
-        SiusDataToPostgresAdapter adapter = adapter(null, baseUrl(), "wrong-token", 5);
+        Notifier notifier = notifier(null, baseUrl(), "wrong-token", 5);
 
-        adapter.sendGotifyNotification("Title", "Body text");
+        notifier.sendGotifyNotification("Title", "Body text");
 
         onlyRequest();
         verify(logger).error("Failed to send Gotify notification. Response Code: {}", 403);
@@ -168,10 +163,10 @@ class NotificationClientTest {
 
     @Test
     void gotifyLogsAConnectionFailureInsteadOfThrowing() {
-        SiusDataToPostgresAdapter adapter = adapter(null, baseUrl(), "app-token", 5);
+        Notifier notifier = notifier(null, baseUrl(), "app-token", 5);
         server.stop(0);
 
-        adapter.sendGotifyNotification("Title", "Body text");
+        notifier.sendGotifyNotification("Title", "Body text");
 
         assertTrue(requests.isEmpty());
         verify(logger).error(eq("Error sending Gotify notification: {}"), anyString(), any(IOException.class));

@@ -1,6 +1,6 @@
 # The SIUSData export as this adapter reads it
 
-This page is written from the parser in `SiusDataToPostgresAdapter.java`. It describes what the code does with the files, not what SIUS specifies; SIUS's own documents are listed in [references.md](references.md).
+This page is written from the parser in `DirectoryWatcher.java` (which files are read), `ShotFileImporter.java` (how lines are read) and `ShotRecordMapper.java` (how fields become columns). It describes what the code does with the files, not what SIUS specifies; SIUS's own documents are listed in [references.md](references.md).
 
 ## The three file kinds
 

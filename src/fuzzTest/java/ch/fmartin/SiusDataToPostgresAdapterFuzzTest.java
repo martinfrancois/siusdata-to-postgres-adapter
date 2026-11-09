@@ -35,13 +35,13 @@ class SiusDataToPostgresAdapterFuzzTest {
     // Column 1 is the file name, columns 2 to 29 hold the fields of the line.
     private static final List<Integer> ALL_COLUMNS = IntStream.rangeClosed(1, ShotFile.FIELD_COUNT + 1).boxed().toList();
 
-    private static final SiusDataToPostgresAdapter ADAPTER = new SiusDataToPostgresAdapter(
-            NOPLogger.NOP_LOGGER, null, null, null, null, null, null, null, null) {
-        @Override
-        void sendNotifications(String title, String message) {
-            // Every malformed field reports an error, and the fuzzer must not send those anywhere.
-        }
-    };
+    private static final ShotRecordMapper MAPPER = new ShotRecordMapper(
+            new Notifier(NOPLogger.NOP_LOGGER, null, null, null, AdapterConfiguration.DEFAULT_GOTIFY_PRIORITY) {
+                @Override
+                void sendNotifications(String title, String message) {
+                    // Every malformed field reports an error, and the fuzzer must not send those anywhere.
+                }
+            });
 
     /**
      * {@code seeds} has to be a constant, so it repeats the directory the build passes in. This test keeps
@@ -76,7 +76,7 @@ class SiusDataToPostgresAdapterFuzzTest {
         for (CsvRecord csvRecord : records) {
             List<Integer> filledColumns = new ArrayList<>();
             try {
-                ADAPTER.populateInsertStatement(recordingStatement(filledColumns), csvRecord, shotFile.name());
+                MAPPER.populateInsertStatement(recordingStatement(filledColumns), csvRecord, shotFile.name());
             } catch (SQLException e) {
                 throw new AssertionError("the recording statement never throws", e);
             }
@@ -89,7 +89,7 @@ class SiusDataToPostgresAdapterFuzzTest {
             Path file = Files.createTempFile("siusdata-fuzz", ".csv");
             try {
                 Files.writeString(file, shotFile.content());
-                return ADAPTER.parseNewCsvRecords(file, 0);
+                return ShotFileImporter.parseNewCsvRecords(file, 0);
             } finally {
                 Files.delete(file);
             }
