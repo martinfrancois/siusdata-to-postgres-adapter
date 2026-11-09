@@ -24,9 +24,9 @@ The remaining entries mainly relate to PostgreSQL replication state checks and s
 
 ## Implemented optimisation
 
-The adapter previously created and closed a fresh `PreparedStatement` for every CSV record. That pattern encourages the JDBC driver to re-run metadata lookups and increases GC pressure. The processing loop now prepares the insert statement once and reuses it for all rows in the same transaction, clearing parameters between iterations before executing the statement.【F:src/main/java/ch/fmartin/SiusDataToPostgresAdapter.java†L652-L705】
+The adapter previously created and closed a fresh `PreparedStatement` for every CSV record. That pattern encourages the JDBC driver to re-run metadata lookups and increases GC pressure. The processing loop now prepares the insert statement once and reuses it for all rows in the same transaction, clearing parameters between iterations before executing the statement.【F:src/main/java/ch/fmartin/ShotFileImporter.java†L78-L97】
 
-This change keeps the transactional behaviour identical while reducing per-row overhead on both the application and database sides. Unit tests were extended to cover the helper that prepares the reusable statement and the adjusted insertion workflow.【F:src/test/java/ch/fmartin/SiusDataToPostgresAdapterTest.java†L812-L844】
+This change keeps the transactional behaviour identical while reducing per-row overhead on both the application and database sides. Unit tests were extended to cover the helper that prepares the reusable statement and the adjusted insertion workflow.【F:src/test/java/ch/fmartin/ShotRecordMapperTest.java†L227-L259】
 
 ## Additional tuning ideas
 
