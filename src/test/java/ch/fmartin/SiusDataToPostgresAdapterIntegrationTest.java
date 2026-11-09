@@ -1,6 +1,5 @@
 package ch.fmartin;
 
-import com.github.stefanbirkner.systemlambda.SystemLambda;
 import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
@@ -8,6 +7,8 @@ import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.testcontainers.containers.Network;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.toxiproxy.ToxiproxyContainer;
@@ -35,7 +36,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+// Every test starts its own network, containers and directory, and hands the adapter its own environment.
+@Execution(ExecutionMode.CONCURRENT)
 public class SiusDataToPostgresAdapterIntegrationTest {
+
+    // Rootless Podman can hand two containers that start at the same moment the same host port, and
+    // the losing start fails with "address already in use"; a new attempt gets another port.
+    // https://github.com/containers/podman/issues/19048
+    private static final int CONTAINER_STARTUP_ATTEMPTS = 3;
 
     private PostgreSQLContainer postgreSQLContainer;
     private Path tempDir;
@@ -45,6 +53,18 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     private ToxiproxyContainer toxiproxy;
     private Proxy proxy;
     private ToxiproxyClient toxiproxyClient;
+    // What the adapter reads instead of the process environment, so concurrent tests can't see each other's values.
+    private Map<String, String> environment = Map.of();
+
+    @FunctionalInterface
+    private interface TestBody {
+        void run() throws Exception;
+    }
+
+    private void withEnvironment(Map<String, String> variables, TestBody body) throws Exception {
+        environment = variables;
+        body.run();
+    }
 
     @BeforeEach
     public void setUp() throws Exception {
@@ -57,13 +77,15 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                 .withNetwork(network)
                 .withNetworkAliases("postgres")
                 .withExposedPorts(5432)
+                .withStartupAttempts(CONTAINER_STARTUP_ATTEMPTS)
                 .waitingFor(new TestContainerPostgresWaitStrategy());
 
         postgreSQLContainer.start();
 
         // Initialize Toxiproxy container and proxy for PostgreSQL
         toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.13.0")
-                .withNetwork(network);
+                .withNetwork(network)
+                .withStartupAttempts(CONTAINER_STARTUP_ATTEMPTS);
         toxiproxy.start();
 
         toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort());
@@ -84,27 +106,31 @@ public class SiusDataToPostgresAdapterIntegrationTest {
             adapterThread.join();
         }
 
-        // Delete temporary directory and files
-        Files.walk(tempDir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete);
-
+        // setUp creates these in order, so after a failed container start the later ones are still null.
+        if (tempDir != null) {
+            Files.walk(tempDir)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+        }
+        if (toxiproxy != null) {
+            toxiproxy.stop();
+        }
         postgreSQLContainer.stop();
-        toxiproxy.stop();
+        network.close();
     }
 
     @Test
     public void testIgnoresSidecarFilesInReproductionFolder() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", Path.of("src/test/resources/reproduction").toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", Path.of("src/test/resources/reproduction").toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -148,12 +174,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testShutdownInterruptsRetryLoop() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // Create an invalid CSV to force processing exceptions and retries
                     String badLine = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276\n"; // too few columns
                     Path badFile = tempDir.resolve("20260101.csv");
@@ -161,7 +187,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -185,12 +211,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingExistingCsvFile() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     String csvData = """
                             244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0
@@ -205,7 +231,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     // when
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -235,16 +261,16 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingNewCsvFile() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -290,12 +316,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingUpdatedCsvFile() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     String csvData = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
                     String csvFileName = "20231016_test.csv";
@@ -305,7 +331,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -345,12 +371,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingMultipleCsvFiles() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     String csvData1 = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;1;3;2373669100;0;0;0;64;0\n";
                     String csvData2 = "244062;10;0;3;10.1;691;17:32:54.90;0;0.83045;-6.86711;1;655.35;0;0;152;0;0;0;0;0;2;3;2373677490;0;0;0;64;0\n";
@@ -366,7 +392,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -396,12 +422,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingLargeCsvFile() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
                     for (int i = 1; i <= 6000; i++) {
@@ -430,7 +456,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -461,12 +487,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingNewFileAfterStart() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
                     for (int i = 1; i <= 30000; i++) {
@@ -494,7 +520,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -531,12 +557,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingFileModificationAfterStart() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
                     for (int i = 1; i <= 15000; i++) {
@@ -565,7 +591,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -605,16 +631,16 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testProcessingFilesCreatedAfterAdapterStart() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -685,12 +711,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testDatabaseConnectionInterruptedDuringProcessing() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test")
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test",
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
                     for (int i = 1; i <= 30000; i++) {
@@ -720,7 +746,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     // Start the adapter in a separate thread
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -767,12 +793,12 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testDatabaseConnectionRefusedDuringProcessing() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test")
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", "jdbc:postgresql://" + toxiproxy.getHost() + ":" + toxiproxy.getMappedPort(8666) + "/test",
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     // given
                     StringBuilder csvDataBuilder = new StringBuilder();
                     for (int i = 1; i <= 30000; i++) {
@@ -802,7 +828,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     // Start the adapter in a separate thread
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -848,7 +874,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     private void startAdapterAndProcess(Path csvFilePath) throws Exception {
         adapterThread = new Thread(() -> {
             try {
-                adapter = new SiusDataToPostgresAdapter();
+                adapter = new SiusDataToPostgresAdapter(environment::get);
                 adapter.start();
             } catch (Exception e) {
                 e.printStackTrace();
@@ -939,15 +965,15 @@ public class SiusDataToPostgresAdapterIntegrationTest {
     }
 
     private void runAdapterUntilInitialized(Path csvDirectory, long timeout, TimeUnit unit) throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", csvDirectory.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .and("PUSHBULLET_API_KEY", "")
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", csvDirectory.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword(),
+                "PUSHBULLET_API_KEY", ""), () -> {
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -993,11 +1019,11 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testEmptyIntegerFields() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword()), () -> {
                     // Write a CSV file with empty integer fields
                     String csvData = "244062;10;;3;;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
                     Path csvFilePath = tempDir.resolve("20250101_test_empty_integers.csv");
@@ -1020,11 +1046,11 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testNonIntegerInIntegerField() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword()), () -> {
                     // Write a CSV file with non-integer in integer fields
                     String csvData = "244062;Shooter 678267;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
                     Path csvFilePath = tempDir.resolve("20250101_test_non_integer.csv");
@@ -1047,11 +1073,11 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testFewerColumns() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword()), () -> {
                     // Write a CSV file with fewer than 27 columns
                     String csvData = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152\n";
                     Path csvFilePath = tempDir.resolve("20250101_test_fewer_columns.csv");
@@ -1060,7 +1086,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     // Start the adapter (do not wait for processed rows, as this file is invalid)
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -1090,11 +1116,11 @@ public class SiusDataToPostgresAdapterIntegrationTest {
 
     @Test
     public void testPartialLineCompletion() throws Exception {
-        SystemLambda.withEnvironmentVariable("CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString())
-                .and("POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl())
-                .and("POSTGRESQL_USER", postgreSQLContainer.getUsername())
-                .and("POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword())
-                .execute(() -> {
+        withEnvironment(Map.of(
+                "CSV_MONITOR_PATH", tempDir.toAbsolutePath().toString(),
+                "POSTGRESQL_URL", postgreSQLContainer.getJdbcUrl(),
+                "POSTGRESQL_USER", postgreSQLContainer.getUsername(),
+                "POSTGRESQL_PASSWORD", postgreSQLContainer.getPassword()), () -> {
                     // Write a partial line to the CSV file
                     String partialLine = "244062;10;0;3;10.2;564;17:31:31.00;0;2.78276;4.90984;1;655.35;0;0;152;0";
                     String remainingLine = ";0;0;0;0;0;5;3;2373669100;0;0;0;64;0\n";
@@ -1104,7 +1130,7 @@ public class SiusDataToPostgresAdapterIntegrationTest {
                     // Start the adapter in a separate thread
                     adapterThread = new Thread(() -> {
                         try {
-                            adapter = new SiusDataToPostgresAdapter();
+                            adapter = new SiusDataToPostgresAdapter(environment::get);
                             adapter.start();
                         } catch (Exception e) {
                             e.printStackTrace();
