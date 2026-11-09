@@ -67,6 +67,8 @@ class SiusDataToPostgresAdapterJarIntegrationTest {
                 Awaitility.await()
                         .atMost(2, TimeUnit.MINUTES)
                         .pollInterval(1, TimeUnit.SECONDS)
+                        // The tables exist only once the adapter created them; before that the query throws and the poll retries.
+                        .ignoreExceptionsInstanceOf(SQLException.class)
                         .until(() -> !adapter.isAlive() || countShots(postgres) == expectedShots);
 
                 assertTrue(adapter.isAlive(), "the adapter should keep watching the folder after the import");
@@ -112,7 +114,6 @@ class SiusDataToPostgresAdapterJarIntegrationTest {
         try (Connection connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery(sql)) {
-            // The tables exist only once the adapter created them; before that the query throws and the poll retries.
             return resultSet.next() ? resultSet.getInt(1) : 0;
         }
     }
