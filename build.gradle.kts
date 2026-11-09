@@ -101,6 +101,11 @@ tasks.test {
         }
     }
 
+    // -PtestPostgresImage=postgres:16.15 runs the integration tests against another PostgreSQL image.
+    providers.gradleProperty("testPostgresImage").orNull?.let { image ->
+        systemProperty("siusdata.postgresImage", image)
+    }
+
     // SiusDataToPostgresAdapterJarIntegrationTest starts the shadow jar in a separate JVM.
     val shadowJarFile = tasks.shadowJar.flatMap { it.archiveFile }
     inputs.file(shadowJarFile)
