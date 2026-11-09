@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -89,22 +90,30 @@ public class SiusDataToPostgresAdapter {
      * Default constructor that initializes all dependencies internally.
      */
     public SiusDataToPostgresAdapter() {
+        this(System::getenv);
+    }
+
+    /**
+     * Initializes all dependencies internally and reads the configuration through {@code environment},
+     * which returns the value of a variable or {@code null} when it is not set.
+     */
+    SiusDataToPostgresAdapter(UnaryOperator<String> environment) {
         this.logger = LoggerFactory.getLogger(SiusDataToPostgresAdapter.class);
 
         // Configure DNS caching
         configureDNSCaching();
 
         // Validate and load environment variables
-        this.directoryToWatch = System.getenv("CSV_MONITOR_PATH");
-        this.jdbcUrl = System.getenv("POSTGRESQL_URL");
-        this.jdbcUser = System.getenv("POSTGRESQL_USER");
-        this.jdbcPassword = System.getenv("POSTGRESQL_PASSWORD");
-        this.pushbulletApiKey = System.getenv("PUSHBULLET_API_KEY");
-        this.gotifyUrl = System.getenv("GOTIFY_URL");
-        this.gotifyToken = System.getenv("GOTIFY_TOKEN");
+        this.directoryToWatch = environment.apply("CSV_MONITOR_PATH");
+        this.jdbcUrl = environment.apply("POSTGRESQL_URL");
+        this.jdbcUser = environment.apply("POSTGRESQL_USER");
+        this.jdbcPassword = environment.apply("POSTGRESQL_PASSWORD");
+        this.pushbulletApiKey = environment.apply("PUSHBULLET_API_KEY");
+        this.gotifyUrl = environment.apply("GOTIFY_URL");
+        this.gotifyToken = environment.apply("GOTIFY_TOKEN");
 
         int resolvedPriority = DEFAULT_GOTIFY_PRIORITY;
-        String gotifyPriorityEnv = System.getenv("GOTIFY_PRIORITY");
+        String gotifyPriorityEnv = environment.apply("GOTIFY_PRIORITY");
         if (gotifyPriorityEnv != null && !gotifyPriorityEnv.isBlank()) {
             try {
                 resolvedPriority = Integer.parseInt(gotifyPriorityEnv.trim());

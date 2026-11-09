@@ -56,7 +56,6 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testImplementation("org.testcontainers:testcontainers-toxiproxy:2.0.5")
-    testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
     testImplementation("org.awaitility:awaitility:4.3.0")
     testImplementation("net.jqwik:jqwik:1.10.2")
     testRuntimeOnly("net.jqwik:jqwik-engine:1.10.2")
@@ -73,14 +72,9 @@ tasks.test {
     useJUnitPlatform {
         includeEngines("junit-jupiter", "jqwik")
     }
-    // fix for: "Unable to make field private final java.util.Map java.util.Collections$UnmodifiableMap.m accessible: module java.base does not "opens java.util" to unnamed module"
-    // --enable-native-access: Testcontainers reaches the container engine through docker-java, which
-    // loads JNA, and the JVM allows that native call only when it is granted here.
-    jvmArgs = listOf(
-        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED",
-        "--enable-native-access=ALL-UNNAMED"
-    )
+    // Testcontainers reaches the container engine through docker-java, which loads JNA, and the JVM
+    // allows that native call only when it is granted here.
+    jvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 
     val skipIntegrationTests = providers.provider {
         val propertyValue = project.findProperty("skipIntegrationTests") as? String
